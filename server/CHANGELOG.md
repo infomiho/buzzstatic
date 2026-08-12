@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/infomiho/buzzstatic/compare/server-v0.4.1...server-v0.5.0) (2026-08-12)
+
+
+### Features
+
+* add container health checks ([a284418](https://github.com/infomiho/buzzstatic/commit/a2844182d93f7e608a2ea25d4a8887689a0f882c))
+
 ## [0.4.1](https://github.com/infomiho/buzzstatic/compare/server-v0.4.0...server-v0.4.1) (2026-08-03)
 
 
