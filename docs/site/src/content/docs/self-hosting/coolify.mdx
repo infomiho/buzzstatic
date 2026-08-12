@@ -50,6 +50,8 @@ Open **Servers > Proxy** and edit the Traefik Compose configuration there. Do no
 
 Copy the complete current configuration to secure off-host storage before changing it. The copy is the rollback source for the server-wide proxy.
 
+Custom proxy configurations pin the Traefik image. After each Coolify upgrade, compare its [published Traefik version](https://cdn.coollabs.io/coolify/versions.json), update the `image:` tag here if needed, and restart the proxy.
+
 1. Add the Cloudflare token to the Traefik service:
 
    ```yaml
