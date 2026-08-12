@@ -80,6 +80,12 @@ services:
     expose:
       - "8080"
       - "8081"
+    healthcheck:
+      test: ["CMD", "uv", "run", "python", "-m", "server.healthcheck"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
     labels:
       - traefik.enable=true
       - traefik.http.routers.buzz.rule=Host(`${BUZZ_DOMAIN}`)
