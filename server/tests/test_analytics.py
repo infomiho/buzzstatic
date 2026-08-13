@@ -239,11 +239,13 @@ class CaptureAnalytics:
 
 
 class TestAnalyticsIntegration:
-    def test_hosted_site_requests_record_analytics_events(self, make_app, tmp_path):
+    def test_hosted_site_requests_record_analytics_events(self, make_app, database, tmp_path):
         site = tmp_path / "my-site"
         site.mkdir()
         (site / "index.html").write_text("hello")
         (site / "style.css").write_text("body{}")
+        with database.connect() as conn:
+            conn.execute("INSERT INTO sites (name) VALUES ('my-site')")
 
         app = make_app()
         capture = CaptureAnalytics()
@@ -258,10 +260,12 @@ class TestAnalyticsIntegration:
             ("/missing", False, True),
         ]
 
-    def test_alias_lookup_failure_does_not_break_static_serving(self, make_app, tmp_path):
+    def test_alias_lookup_failure_does_not_break_static_serving(self, make_app, database, tmp_path):
         site = tmp_path / "my-site"
         site.mkdir()
         (site / "index.html").write_text("hello")
+        with database.connect() as conn:
+            conn.execute("INSERT INTO sites (name) VALUES ('my-site')")
 
         app = make_app(custom_domains_enabled=True)
         capture = CaptureAnalytics()

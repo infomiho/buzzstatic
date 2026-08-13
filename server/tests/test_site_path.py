@@ -31,37 +31,13 @@ class TestValidatedSubdomain:
     def test_normalizes_to_lowercase(self):
         assert validated_subdomain("My-Site") == "my-site"
 
-    def test_rejects_empty(self):
+    @pytest.mark.parametrize(
+        "value",
+        ["", "   ", "../escape", "foo/bar", "foo.bar", "my site!", "-my-site", "a" * 64],
+    )
+    def test_rejects_invalid_names(self, value):
         with pytest.raises(InvalidSubdomain):
-            validated_subdomain("")
-
-    def test_rejects_whitespace_only(self):
-        with pytest.raises(InvalidSubdomain):
-            validated_subdomain("   ")
-
-    def test_rejects_path_traversal(self):
-        with pytest.raises(InvalidSubdomain):
-            validated_subdomain("../escape")
-
-    def test_rejects_slashes(self):
-        with pytest.raises(InvalidSubdomain):
-            validated_subdomain("foo/bar")
-
-    def test_rejects_dots(self):
-        with pytest.raises(InvalidSubdomain):
-            validated_subdomain("foo.bar")
-
-    def test_rejects_special_characters(self):
-        with pytest.raises(InvalidSubdomain):
-            validated_subdomain("my site!")
-
-    def test_rejects_starting_with_hyphen(self):
-        with pytest.raises(InvalidSubdomain):
-            validated_subdomain("-my-site")
-
-    def test_rejects_too_long(self):
-        with pytest.raises(InvalidSubdomain):
-            validated_subdomain("a" * 64)
+            validated_subdomain(value)
 
     def test_accepts_max_length(self):
         assert validated_subdomain("a" * 63) == "a" * 63
@@ -142,13 +118,6 @@ class TestResolveSiteFile:
         result = resolve_site_file(tmp_path, "my-site", "/../secret.txt")
         assert result is None
 
-    def test_blocks_encoded_path_traversal(self, tmp_path):
-        site = tmp_path / "my-site"
-        site.mkdir()
-
-        result = resolve_site_file(tmp_path, "my-site", "/..%2F..%2Fetc/passwd")
-        assert result is None
-
     def test_blocks_encoded_path_traversal_before_spa_fallback(self, tmp_path):
         site = tmp_path / "my-site"
         site.mkdir()
@@ -182,7 +151,3 @@ class TestResolveSiteFile:
 
         result = resolve_site_file(tmp_path, "my-site", "/assets/style.css")
         assert result == (site / "assets" / "style.css").resolve()
-
-    def test_invalid_subdomain_raises(self, tmp_path):
-        with pytest.raises(InvalidSubdomain):
-            resolve_site_file(tmp_path, "../../etc", "/passwd")

@@ -312,6 +312,8 @@
         "properties": {
           "name": {
             "default": "Deployment token",
+            "maxLength": 100,
+            "minLength": 1,
             "title": "Name",
             "type": "string"
           },
@@ -438,8 +440,12 @@
         "title": "CustomDomainRoutingTarget",
         "type": "object"
       },
-      "DeploymentResponse": {
+      "DeploySiteResponse": {
         "properties": {
+          "deployment_number": {
+            "title": "Deployment Number",
+            "type": "integer"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -448,6 +454,10 @@
             "title": "Private",
             "type": "boolean"
           },
+          "site_name": {
+            "title": "Site Name",
+            "type": "string"
+          },
           "url": {
             "title": "Url",
             "type": "string"
@@ -455,10 +465,12 @@
         },
         "required": [
           "name",
+          "site_name",
           "url",
-          "private"
+          "private",
+          "deployment_number"
         ],
-        "title": "DeploymentResponse",
+        "title": "DeploySiteResponse",
         "type": "object"
       },
       "DeploymentTokenResponse": {
@@ -1066,6 +1078,61 @@
         "title": "SiteAccessResponse",
         "type": "object"
       },
+      "SiteDeploymentResponse": {
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "actor": {
+            "title": "Actor",
+            "type": "string"
+          },
+          "credential": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credential"
+          },
+          "deployed_at": {
+            "format": "date-time",
+            "title": "Deployed At",
+            "type": "string"
+          },
+          "deployment_number": {
+            "title": "Deployment Number",
+            "type": "integer"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "source": {
+            "enum": [
+              "dashboard",
+              "api"
+            ],
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "deployment_number",
+          "deployed_at",
+          "size_bytes",
+          "source",
+          "actor",
+          "credential",
+          "active"
+        ],
+        "title": "SiteDeploymentResponse",
+        "type": "object"
+      },
       "SiteReaderResponse": {
         "properties": {
           "avatar_url": {
@@ -1111,7 +1178,13 @@
       "SiteResponse": {
         "properties": {
           "created": {
+            "format": "date-time",
             "title": "Created",
+            "type": "string"
+          },
+          "last_deployed_at": {
+            "format": "date-time",
+            "title": "Last Deployed At",
             "type": "string"
           },
           "name": {
@@ -1141,6 +1214,7 @@
         "required": [
           "name",
           "created",
+          "last_deployed_at",
           "size_bytes",
           "total_views",
           "private"
@@ -1465,11 +1539,11 @@
     },
     "/deploy": {
       "post": {
-        "description": "Upload a ZIP archive to create or replace a site. A deployment token may deploy only to its assigned site and must send that name in X-Buzz-Site.",
+        "description": "Upload a ZIP archive as a new deployment. It becomes active immediately. Buzz creates the site if needed. A deployment token may deploy only to its assigned site and must send that name in X-Buzz-Site.",
         "operationId": "deploySite",
         "parameters": [
           {
-            "description": "Site name to create or replace. Buzz generates a name when omitted.",
+            "description": "Site to deploy to. Buzz generates a name when omitted.",
             "in": "header",
             "name": "x-buzz-site",
             "required": false,
@@ -1482,7 +1556,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Site name to create or replace. Buzz generates a name when omitted.",
+              "description": "Site to deploy to. Buzz generates a name when omitted.",
               "title": "X-Buzz-Site"
             }
           },
@@ -1530,7 +1604,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DeploymentResponse"
+                  "$ref": "#/components/schemas/DeploySiteResponse"
                 }
               }
             },
@@ -1754,6 +1828,113 @@
           }
         ],
         "summary": "Delete a site",
+        "tags": [
+          "Sites"
+        ]
+      }
+    },
+    "/sites/{name}/deployments": {
+      "get": {
+        "operationId": "listSiteDeployments",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SiteDeploymentResponse"
+                  },
+                  "title": "Response Listsitedeployments",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "List site deployments",
+        "tags": [
+          "Sites"
+        ]
+      }
+    },
+    "/sites/{name}/deployments/{deployment_number}/activate": {
+      "post": {
+        "operationId": "activateSiteDeployment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "deployment_number",
+            "required": true,
+            "schema": {
+              "title": "Deployment Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiteDeploymentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Activate a site deployment",
         "tags": [
           "Sites"
         ]

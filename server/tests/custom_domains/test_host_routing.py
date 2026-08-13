@@ -43,12 +43,14 @@ def test_tenant_host_cannot_reach_control_routes(make_client):
     assert client.post("/auth/device", headers=headers).status_code == 405
 
 
-def test_tenant_host_serves_files_at_control_route_paths(make_client, tmp_path):
+def test_tenant_host_serves_files_at_control_route_paths(make_client, database, tmp_path):
     site_dir = tmp_path / "tenant"
     (site_dir / "static").mkdir(parents=True)
     (site_dir / "health.html").write_text("tenant health")
     (site_dir / "openapi.json").write_text('{"tenant": true}')
     (site_dir / "static" / "style.css").write_text("tenant styles")
+    with database.connect() as conn:
+        conn.execute("INSERT INTO sites (name) VALUES ('tenant')")
     client = make_client()
     headers = {"host": "tenant.localhost:8080"}
 
@@ -57,10 +59,12 @@ def test_tenant_host_serves_files_at_control_route_paths(make_client, tmp_path):
     assert client.get("/static/style.css", headers=headers).text == "tenant styles"
 
 
-def test_tenant_custom_404_is_served_as_a_file_response(make_client, tmp_path):
+def test_tenant_custom_404_is_served_as_a_file_response(make_client, database, tmp_path):
     site_dir = tmp_path / "tenant"
     site_dir.mkdir()
     (site_dir / "404.html").write_text("tenant not found")
+    with database.connect() as conn:
+        conn.execute("INSERT INTO sites (name) VALUES ('tenant')")
     client = make_client()
 
     response = client.get("/missing", headers={"host": "tenant.localhost:8080"})

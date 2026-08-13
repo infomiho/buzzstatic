@@ -3,28 +3,33 @@ import { join } from "node:path";
 import { CliError, isRecord, requestJson } from "./client.js";
 import { createZipBuffer } from "./lib.js";
 
-export interface UploadResult {
+export interface DeployResult {
   url: string;
-  subdomain: string;
+  siteName: string;
   private: boolean;
+  deploymentNumber?: number;
 }
 
-interface DeploymentResponse {
-  name: string;
+interface DeploySiteResponse {
+  name?: string;
+  site_name?: string;
   url: string;
   private: boolean;
+  deployment_number?: number;
 }
 
-function isDeploymentResponse(value: unknown): value is DeploymentResponse {
+function isDeploySiteResponse(value: unknown): value is DeploySiteResponse {
   return (
     isRecord(value) &&
-    typeof value.name === "string" &&
+    (typeof value.site_name === "string" || typeof value.name === "string") &&
     typeof value.url === "string" &&
-    typeof value.private === "boolean"
+    typeof value.private === "boolean" &&
+    (value.deployment_number === undefined ||
+      (Number.isInteger(value.deployment_number) && value.deployment_number > 0))
   );
 }
 
-export function resolveSubdomain(
+export function resolveSiteName(
   cwd: string,
   directory: string,
   explicit?: string
@@ -64,16 +69,16 @@ export async function uploadSite(
   server: string,
   token: string,
   zip: Buffer,
-  subdomain?: string,
+  siteName?: string,
   fetchFn: typeof fetch = globalThis.fetch,
   makePrivate = false
-): Promise<UploadResult> {
+): Promise<DeployResult> {
   const body = new FormData();
   body.append("file", new Blob([zip], { type: "application/zip" }), "site.zip");
 
   const headers: Record<string, string> = {};
-  if (subdomain) {
-    headers["x-buzz-site"] = subdomain;
+  if (siteName) {
+    headers["x-buzz-site"] = siteName;
   }
   if (makePrivate) {
     headers["x-buzz-access"] = "private";
@@ -82,7 +87,7 @@ export async function uploadSite(
   const data = await requestJson(
     "/deploy",
     {
-      guard: isDeploymentResponse,
+      guard: isDeploySiteResponse,
       invalid: "Server returned an invalid deployment response",
     },
     { method: "POST", headers, body },
@@ -103,5 +108,10 @@ export async function uploadSite(
     }
   );
 
-  return { url: data.url, subdomain: data.name, private: data.private };
+  return {
+    url: data.url,
+    siteName: data.site_name ?? data.name!,
+    private: data.private,
+    deploymentNumber: data.deployment_number,
+  };
 }

@@ -499,7 +499,7 @@ def test_publication_guard_closes_the_file_publish_window(
 
     def pausing_sync(path):
         original_sync(path)
-        if path == tmp_path and (tmp_path / "private-site").is_dir():
+        if path == tmp_path / ".deployments" / "private-site":
             published.set()
             assert release.wait(timeout=5)
 
@@ -813,6 +813,10 @@ def test_deleted_site_stops_being_treated_as_private(make_app, database, tmp_pat
 
     other_token = _session_token(database, github_id=2, login="other")
     _create_site(database, tmp_path, other_token, name="private-site")
+    with database.connect() as conn:
+        app.state.content_roots.load(
+            conn, tmp_path, tmp_path / ".deployments"
+        )
     assert client.get("/", headers=SITE_HOST).status_code == 200
 
 

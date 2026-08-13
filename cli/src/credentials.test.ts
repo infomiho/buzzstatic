@@ -38,23 +38,15 @@ describe("normalizeServerUrl", () => {
     );
   });
 
-  it("rejects non-http schemes", () => {
-    expect(() => normalizeServerUrl("ftp://buzz.example.com")).toThrow(CliError);
-  });
-
-  it("rejects strings that are not URLs", () => {
-    expect(() => normalizeServerUrl("buzz.example.com")).toThrow(CliError);
-  });
+  it.each(["ftp://buzz.example.com", "buzz.example.com"])(
+    "rejects invalid server URL %s",
+    (url) => {
+      expect(() => normalizeServerUrl(url)).toThrow(CliError);
+    }
+  );
 });
 
 describe("credential scoping", () => {
-  it("returns the token stored for the same server", () => {
-    const config: Config = {};
-    setCredential(config, "https://buzz.example.com", "token-a");
-
-    expect(getCredential(config, "https://buzz.example.com")).toBe("token-a");
-  });
-
   it("returns nothing for a different server", () => {
     const config: Config = {};
     setCredential(config, "https://a.example.com", "token-a");

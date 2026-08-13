@@ -11,11 +11,13 @@ from server.custom_domains.claims import DomainClaimStore
 from server.custom_domains.errors import ClaimConflict
 from server.exceptions import BadRequest, Forbidden, NotFound, PayloadTooLarge
 from server.site_store import DeploymentLimits, SiteStore
+from server.serving_content_roots import ServingContentRoots
 
 
 def make_db() -> sqlite3.Connection:
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
     conn.execute(
         "CREATE TABLE sites ("
         "  name TEXT PRIMARY KEY,"
@@ -33,7 +35,28 @@ def make_db() -> sqlite3.Connection:
         site_name TEXT PRIMARY KEY,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )""")
+    conn.execute("""CREATE TABLE site_deployments (
+        site_name TEXT NOT NULL,
+        deployment_number INTEGER NOT NULL,
+        deployed_at DATETIME NOT NULL,
+        size_bytes INTEGER NOT NULL,
+        source TEXT NOT NULL,
+        actor TEXT NOT NULL,
+        credential TEXT,
+        PRIMARY KEY (site_name, deployment_number),
+        FOREIGN KEY (site_name) REFERENCES sites(name) ON DELETE CASCADE)""")
+    conn.execute("""CREATE TABLE active_site_deployments (
+        site_name TEXT PRIMARY KEY,
+        deployment_number INTEGER NOT NULL,
+        FOREIGN KEY (site_name) REFERENCES sites(name) ON DELETE CASCADE,
+        FOREIGN KEY (site_name, deployment_number)
+            REFERENCES site_deployments(site_name, deployment_number)
+            ON DELETE CASCADE)""")
     return conn
+
+
+def deployment_path(root: Path, site: str, number: int) -> Path:
+    return root / ".deployments" / site / str(number)
 
 
 def make_zip(files: dict[str, str]) -> bytes:
@@ -77,8 +100,7 @@ class TestDeploy:
         assert record.name == "my-site"
         assert record.owner_id == 1
         assert record.size_bytes > 0
-        assert (tmp_path / "my-site" / "index.html").read_text() == "<h1>hello</h1>"
-        assert list((tmp_path / ".operations").glob("*.json")) == []
+        assert (deployment_path(tmp_path, "my-site", 1) / "index.html").read_text() == "<h1>hello</h1>"
 
         row = conn.execute("SELECT * FROM sites WHERE name = ?", ("my-site",)).fetchone()
         assert row["owner_id"] == 1
@@ -111,21 +133,21 @@ class TestDeploy:
         assert second.name == first.name
         assert second.owner_id == 1
         assert second.size_bytes != first.size_bytes
-        assert (tmp_path / "my-site" / "b.txt").read_text() == "new"
+        assert (deployment_path(tmp_path, "my-site", 2) / "b.txt").read_text() == "new"
 
         rows = conn.execute("SELECT * FROM sites WHERE name = 'my-site'").fetchall()
         assert len(rows) == 1
 
-    def test_redeploy_removes_stale_files(self, tmp_path):
+    def test_redeploy_keeps_deployments_separate(self, tmp_path):
         conn = make_db()
         store = SiteStore(conn, tmp_path)
 
         store.deploy("my-site", archive({"old.html": "v1", "keep.html": "v1"}), owner_id=1)
-        assert (tmp_path / "my-site" / "old.html").exists()
+        assert (deployment_path(tmp_path, "my-site", 1) / "old.html").exists()
 
         store.deploy("my-site", archive({"keep.html": "v2"}), owner_id=1)
-        assert not (tmp_path / "my-site" / "old.html").exists()
-        assert (tmp_path / "my-site" / "keep.html").read_text() == "v2"
+        assert not (deployment_path(tmp_path, "my-site", 2) / "old.html").exists()
+        assert (deployment_path(tmp_path, "my-site", 2) / "keep.html").read_text() == "v2"
 
     def test_zip_path_traversal_raises_bad_request(self, tmp_path):
         conn = make_db()
@@ -177,10 +199,16 @@ class TestDeploy:
                 "my-site", archive({"index.html": "replacement"}), owner_id=1
             )
 
-        assert (tmp_path / "my-site" / "index.html").read_text() == "old"
+        assert (deployment_path(tmp_path, "my-site", 1) / "index.html").read_text() == "old"
+        assert not deployment_path(tmp_path, "my-site", 2).exists()
+        assert [
+            (deployment.deployment_number, deployment.active)
+            for deployment in SiteStore(conn, tmp_path).list_deployments(
+                "my-site", owner_id=1
+            )
+        ] == [(1, True)]
         row = conn.execute("SELECT * FROM sites WHERE name = 'my-site'").fetchone()
         assert dict(row) == dict(original_row)
-        assert list((tmp_path / ".operations").glob("*.json")) == []
 
     def test_rejects_too_many_files(self, tmp_path):
         conn = make_db()
@@ -240,7 +268,7 @@ class TestDeploy:
         original_rename = Path.rename
 
         def fail_staging_publish(path, target):
-            if "stage" in path.name and Path(target) == tmp_path / "my-site":
+            if "stage" in path.name and Path(target) == deployment_path(tmp_path, "my-site", 2):
                 raise OSError("publish failed")
             return original_rename(path, target)
 
@@ -249,7 +277,14 @@ class TestDeploy:
         with pytest.raises(OSError, match="publish failed"):
             store.deploy("my-site", archive({"index.html": "new"}), owner_id=1)
 
-        assert (tmp_path / "my-site" / "index.html").read_text() == "old"
+        assert (deployment_path(tmp_path, "my-site", 1) / "index.html").read_text() == "old"
+        assert not deployment_path(tmp_path, "my-site", 2).exists()
+        assert [
+            (deployment.deployment_number, deployment.active)
+            for deployment in SiteStore(conn, tmp_path).list_deployments(
+                "my-site", owner_id=1
+            )
+        ] == [(1, True)]
         row = conn.execute("SELECT * FROM sites WHERE name = 'my-site'").fetchone()
         assert dict(row) == dict(original_row)
 
@@ -263,7 +298,14 @@ class TestDeploy:
                 "my-site", archive({"index.html": "new"}), owner_id=1
             )
 
-        assert (tmp_path / "my-site" / "index.html").read_text() == "old"
+        assert (deployment_path(tmp_path, "my-site", 1) / "index.html").read_text() == "old"
+        assert not deployment_path(tmp_path, "my-site", 2).exists()
+        assert [
+            (deployment.deployment_number, deployment.active)
+            for deployment in SiteStore(conn, tmp_path).list_deployments(
+                "my-site", owner_id=1
+            )
+        ] == [(1, True)]
         row = conn.execute("SELECT * FROM sites WHERE name = 'my-site'").fetchone()
         assert dict(row) == dict(original_row)
 
@@ -273,6 +315,16 @@ class TestDeploy:
         conn.execute(
             "CREATE TABLE sites ("
             "name TEXT PRIMARY KEY, created_at DATETIME, size_bytes INTEGER, owner_id INTEGER)"
+        )
+        conn.execute(
+            "CREATE TABLE site_deployments ("
+            "site_name TEXT, deployment_number INTEGER, deployed_at DATETIME, "
+            "size_bytes INTEGER, source TEXT, actor TEXT, credential TEXT, "
+            "PRIMARY KEY (site_name, deployment_number))"
+        )
+        conn.execute(
+            "CREATE TABLE active_site_deployments ("
+            "site_name TEXT PRIMARY KEY, deployment_number INTEGER)"
         )
         conn.commit()
         conn.close()
@@ -295,7 +347,9 @@ class TestDeploy:
 
         winner = next(owner_id for owner_id, result in results if result == "deployed")
         assert sorted(result for _, result in results) == ["deployed", "forbidden"]
-        assert (tmp_path / "content" / "shared" / "index.html").read_text() == str(winner)
+        assert (
+            tmp_path / "content" / ".deployments" / "shared" / "1" / "index.html"
+        ).read_text() == str(winner)
         conn = sqlite3.connect(db_path)
         try:
             assert conn.execute("SELECT owner_id FROM sites WHERE name = 'shared'").fetchone()[0] == winner
@@ -318,11 +372,101 @@ class TestListForOwner:
         assert "site-b" in names
         assert "site-c" not in names
 
-    def test_returns_empty_for_no_sites(self, tmp_path):
+class TestDeployments:
+    def test_lists_deployments_newest_first_and_marks_active(self, tmp_path):
         conn = make_db()
         store = SiteStore(conn, tmp_path)
+        store.deploy("my-site", archive({"index.html": "one"}), owner_id=1)
+        store.deploy("my-site", archive({"index.html": "two"}), owner_id=1)
 
-        assert store.list_for_owner(owner_id=99) == []
+        deployments = store.list_deployments("my-site", owner_id=1)
+
+        assert [item.deployment_number for item in deployments] == [2, 1]
+        assert [item.active for item in deployments] == [True, False]
+        assert deployments[0].source == "api"
+        assert deployments[0].actor == "API"
+        assert deployments[0].credential is None
+
+    def test_activates_an_earlier_deployment(self, tmp_path):
+        conn = make_db()
+        store = SiteStore(conn, tmp_path)
+        store.deploy("my-site", archive({"index.html": "one"}), owner_id=1)
+        store.deploy("my-site", archive({"index.html": "two"}), owner_id=1)
+
+        activated = store.activate_deployment("my-site", 1, owner_id=1)
+
+        assert activated.active is True
+        assert store._serving_content_root("my-site") == deployment_path(
+            tmp_path, "my-site", 1
+        )
+        assert (
+            store._serving_content_root("my-site") / "index.html"
+        ).read_text() == "one"
+
+    def test_cannot_activate_another_sites_deployment(self, tmp_path):
+        conn = make_db()
+        store = SiteStore(conn, tmp_path)
+        store.deploy("site-a", archive({"index.html": "a"}), owner_id=1)
+        store.deploy("site-b", archive({"index.html": "b"}), owner_id=1)
+        store.deploy("site-b", archive({"index.html": "b2"}), owner_id=1)
+
+        with pytest.raises(NotFound, match="not found for site"):
+            store.activate_deployment("site-a", 2, owner_id=1)
+
+    def test_keeps_ten_most_recent_deployments(self, tmp_path):
+        conn = make_db()
+        store = SiteStore(conn, tmp_path)
+        for number in range(12):
+            store.deploy(
+                "my-site", archive({"index.html": str(number)}), owner_id=1
+            )
+
+        deployments = store.list_deployments("my-site", owner_id=1)
+
+        assert [item.deployment_number for item in deployments] == list(
+            range(12, 2, -1)
+        )
+        assert not deployment_path(tmp_path, "my-site", 2).exists()
+
+    def test_pruning_waits_for_active_reader(self, tmp_path):
+        conn = make_db()
+        roots = ServingContentRoots()
+        store = SiteStore(conn, tmp_path, content_roots=roots)
+        for number in range(10):
+            store.deploy(
+                "my-site", archive({"index.html": str(number)}), owner_id=1
+            )
+        roots.replace("my-site", deployment_path(tmp_path, "my-site", 1))
+        _, release = roots.acquire("my-site")
+
+        store.deploy("my-site", archive({"index.html": "new"}), owner_id=1)
+
+        assert deployment_path(tmp_path, "my-site", 1).exists()
+        release()
+        assert not deployment_path(tmp_path, "my-site", 1).exists()
+
+    def test_first_numbered_deployment_discards_legacy_root_after_readers_finish(
+        self, tmp_path
+    ):
+        conn = make_db()
+        legacy_root = tmp_path / "my-site"
+        legacy_root.mkdir()
+        (legacy_root / "index.html").write_text("legacy")
+        conn.execute(
+            "INSERT INTO sites (name, owner_id, size_bytes) VALUES ('my-site', 1, 6)"
+        )
+        conn.commit()
+        roots = ServingContentRoots()
+        roots.load(conn, tmp_path, tmp_path / ".deployments")
+        _, release = roots.acquire("my-site")
+
+        SiteStore(conn, tmp_path, content_roots=roots).deploy(
+            "my-site", archive({"index.html": "new"}), owner_id=1
+        )
+
+        assert legacy_root.exists()
+        release()
+        assert not legacy_root.exists()
 
 
 class TestDeclaredEntryCount:
@@ -360,7 +504,7 @@ class TestDelete:
         with pytest.raises(ClaimConflict, match="Remove all of the site's custom domains"):
             store.delete("my-site", owner_id=1)
 
-        assert (tmp_path / "my-site" / "index.html").read_text() == "content"
+        assert (deployment_path(tmp_path, "my-site", 1) / "index.html").read_text() == "content"
         assert conn.execute("SELECT name FROM sites WHERE name = 'my-site'").fetchone()
 
     def test_expired_pending_custom_domain_does_not_block_delete(self, tmp_path):
@@ -375,7 +519,7 @@ class TestDelete:
 
         store.delete("my-site", owner_id=1)
 
-        assert not (tmp_path / "my-site").exists()
+        assert not (tmp_path / ".deployments" / "my-site").exists()
         assert conn.execute("SELECT name FROM sites WHERE name = 'my-site'").fetchone() is None
 
     def test_every_alias_must_complete_withdrawal_before_delete(
@@ -419,7 +563,7 @@ class TestDelete:
         with database.connect() as conn:
             SiteStore(conn, tmp_path).delete("my-site", owner_id=1)
 
-        assert not (tmp_path / "my-site").exists()
+        assert not (tmp_path / ".deployments" / "my-site").exists()
 
     def test_removes_directory_and_db_row(self, tmp_path):
         conn = make_db()
@@ -428,8 +572,9 @@ class TestDelete:
 
         store.delete("doomed", owner_id=1)
 
-        assert not (tmp_path / "doomed").exists()
+        assert not (tmp_path / ".deployments" / "doomed").exists()
         assert conn.execute("SELECT * FROM sites WHERE name = 'doomed'").fetchone() is None
+        assert conn.execute("SELECT * FROM site_deployments").fetchall() == []
 
     def test_missing_site_raises_not_found(self, tmp_path):
         conn = make_db()
@@ -480,88 +625,57 @@ class TestDelete:
         with pytest.raises(sqlite3.OperationalError, match="commit failed"):
             SiteStore(FailingCommitConnection(conn), tmp_path).delete("doomed", owner_id=1)
 
-        assert (tmp_path / "doomed" / "index.html").read_text() == "old"
+        assert (deployment_path(tmp_path, "doomed", 1) / "index.html").read_text() == "old"
         assert conn.execute("SELECT * FROM sites WHERE name = 'doomed'").fetchone()
 
 
 class TestReconcile:
-    def test_restores_previous_site_when_deploy_did_not_commit(self, tmp_path):
+    def test_removes_orphaned_number_before_redeploy(self, tmp_path):
+        conn = make_db()
+        store = SiteStore(conn, tmp_path)
+        orphan = deployment_path(tmp_path, "my-site", 1)
+        orphan.mkdir(parents=True)
+        (orphan / "index.html").write_text("orphan")
+
+        deployed = store.deploy(
+            "my-site", archive({"index.html": "published"}), owner_id=1
+        )
+
+        assert deployed.deployment_number == 1
+        assert (orphan / "index.html").read_text() == "published"
+
+    def test_removes_incomplete_staging_directory(self, tmp_path):
         conn = make_db()
         store = SiteStore(conn, tmp_path)
         store.deploy("my-site", archive({"index.html": "old"}), owner_id=1)
-        site_dir = tmp_path / "my-site"
-        backup_dir = tmp_path / ".my-site-backup-crash"
-        site_dir.rename(backup_dir)
-        site_dir.mkdir()
-        (site_dir / "index.html").write_text("new")
-        store._write_operation(
-            "my-site",
-            {
-                "type": "deploy",
-                "site": "my-site",
-                "created_at": "uncommitted",
-                "staging": ".my-site-stage-crash",
-                "backup": backup_dir.name,
-                "had_site": True,
-            },
-        )
+        staging_dir = tmp_path / ".deployments" / "my-site" / ".stage-crash"
+        staging_dir.mkdir()
+        (staging_dir / "index.html").write_text("new")
 
         store.reconcile()
 
-        assert (site_dir / "index.html").read_text() == "old"
-        assert not backup_dir.exists()
-        assert list((tmp_path / ".operations").glob("*.json")) == []
+        assert not staging_dir.exists()
+        assert (deployment_path(tmp_path, "my-site", 1) / "index.html").read_text() == "old"
 
-    def test_keeps_published_site_when_deploy_committed(self, tmp_path):
+    def test_missing_active_deployment_blocks_startup(self, tmp_path):
         conn = make_db()
         store = SiteStore(conn, tmp_path)
         store.deploy("my-site", archive({"index.html": "old"}), owner_id=1)
-        site_dir = tmp_path / "my-site"
-        backup_dir = tmp_path / ".my-site-backup-crash"
-        site_dir.rename(backup_dir)
-        site_dir.mkdir()
-        (site_dir / "index.html").write_text("new")
-        conn.execute("UPDATE sites SET created_at = 'committed' WHERE name = 'my-site'")
-        conn.commit()
-        store._write_operation(
-            "my-site",
-            {
-                "type": "deploy",
-                "site": "my-site",
-                "created_at": "committed",
-                "staging": ".my-site-stage-crash",
-                "backup": backup_dir.name,
-                "had_site": True,
-            },
-        )
+        SiteStore._remove_path(deployment_path(tmp_path, "my-site", 1))
 
-        store.reconcile()
+        with pytest.raises(RuntimeError, match="Deployment 1"):
+            store.reconcile()
 
-        assert (site_dir / "index.html").read_text() == "new"
-        assert not backup_dir.exists()
-        assert list((tmp_path / ".operations").glob("*.json")) == []
-
-    def test_restores_site_when_delete_did_not_commit(self, tmp_path):
+    def test_missing_inactive_deployment_is_removed_from_history(self, tmp_path):
         conn = make_db()
         store = SiteStore(conn, tmp_path)
         store.deploy("my-site", archive({"index.html": "old"}), owner_id=1)
-        site_dir = tmp_path / "my-site"
-        backup_dir = tmp_path / ".my-site-backup-crash"
-        site_dir.rename(backup_dir)
-        store._write_operation(
-            "my-site",
-            {
-                "type": "delete",
-                "site": "my-site",
-                "backup": backup_dir.name,
-            },
-        )
+        store.deploy("my-site", archive({"index.html": "current"}), owner_id=1)
+        SiteStore._remove_path(deployment_path(tmp_path, "my-site", 1))
 
         store.reconcile()
 
-        assert (site_dir / "index.html").read_text() == "old"
-        assert not backup_dir.exists()
-        assert list((tmp_path / ".operations").glob("*.json")) == []
+        assert [item.deployment_number for item in store.list_deployments("my-site", 1)] == [2]
 
     def test_unreadable_operation_blocks_startup(self, tmp_path):
         conn = make_db()
@@ -572,27 +686,84 @@ class TestReconcile:
         with pytest.raises(RuntimeError, match="Could not reconcile 1 deployment operation"):
             SiteStore(conn, tmp_path).reconcile()
 
-    def test_unresolved_operation_blocks_next_deploy(self, tmp_path):
+    def test_restores_legacy_site_when_delete_did_not_commit(self, tmp_path):
+        conn = make_db()
+        legacy = tmp_path / "legacy"
+        legacy.mkdir()
+        (legacy / "index.html").write_text("content")
+        conn.execute(
+            "INSERT INTO sites (name, owner_id) VALUES ('legacy', 1)"
+        )
+        conn.commit()
+        backup = tmp_path / ".legacy-backup-crash"
+        legacy.rename(backup)
+        store = SiteStore(conn, tmp_path)
+        store._write_operation(
+            "legacy",
+            {"type": "delete", "site": "legacy", "backup": backup.name},
+        )
+
+        store.reconcile()
+
+        assert (legacy / "index.html").read_text() == "content"
+        assert not backup.exists()
+
+    def test_discards_legacy_backup_when_delete_committed(self, tmp_path):
+        conn = make_db()
+        backup = tmp_path / ".legacy-backup-crash"
+        backup.mkdir()
+        (backup / "index.html").write_text("content")
+        store = SiteStore(conn, tmp_path)
+        store._write_operation(
+            "legacy",
+            {"type": "delete", "site": "legacy", "backup": backup.name},
+        )
+
+        store.reconcile()
+
+        assert not backup.exists()
+
+    def test_restores_deployment_tree_when_delete_did_not_commit(self, tmp_path):
         conn = make_db()
         store = SiteStore(conn, tmp_path)
-        store.deploy("my-site", archive({"index.html": "old"}), owner_id=1)
+        store.deploy("my-site", archive({"index.html": "content"}), owner_id=1)
+        deployments = tmp_path / ".deployments" / "my-site"
+        backup = tmp_path / ".deployments" / ".my-site-delete-crash"
+        deployments.rename(backup)
         store._write_operation(
             "my-site",
             {
-                "type": "deploy",
+                "type": "delete",
                 "site": "my-site",
-                "created_at": "unresolved",
-                "staging": ".my-site-stage-unresolved",
                 "backup": None,
-                "had_site": True,
+                "deployments_backup": backup.name,
             },
         )
 
-        with pytest.raises(RuntimeError, match="unresolved deployment operation"):
-            store.deploy("my-site", archive({"index.html": "new"}), owner_id=1)
+        store.reconcile()
 
-        assert (tmp_path / "my-site" / "index.html").read_text() == "old"
+        assert (deployments / "1" / "index.html").read_text() == "content"
+        assert not backup.exists()
 
+    def test_discards_deployment_tree_when_delete_committed(self, tmp_path):
+        conn = make_db()
+        backup = tmp_path / ".deployments" / ".my-site-delete-crash"
+        backup.mkdir(parents=True)
+        (backup / "1").mkdir()
+        store = SiteStore(conn, tmp_path)
+        store._write_operation(
+            "my-site",
+            {
+                "type": "delete",
+                "site": "my-site",
+                "backup": None,
+                "deployments_backup": backup.name,
+            },
+        )
+
+        store.reconcile()
+
+        assert not backup.exists()
 
 class TestListFiles:
     def test_returns_files_with_correct_paths_and_sizes(self, tmp_path):
@@ -672,13 +843,3 @@ class TestListFiles:
 
         with pytest.raises(Forbidden, match="don't own"):
             store.list_files("secret", owner_id=2)
-
-    def test_empty_site_returns_empty_list(self, tmp_path):
-        conn = make_db()
-        conn.execute(
-            "INSERT INTO sites (name, size_bytes, owner_id) VALUES (?, ?, ?)",
-            ("empty", 0, 1),
-        )
-        store = SiteStore(conn, tmp_path)
-
-        assert store.list_files("empty", owner_id=1) == []

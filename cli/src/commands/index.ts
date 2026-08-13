@@ -8,10 +8,12 @@ import { registerAuthCommands } from "./auth.js";
 import { registerTokensCommand } from "./tokens.js";
 import { registerDomainsCommand } from "./domains.js";
 import { registerAccessCommand } from "./access.js";
+import { registerDeploymentsCommands } from "./deployments.js";
 
 export function registerCommands(program: Command) {
   program.commandsGroup("Sites:");
   registerDeployCommand(program);
+  registerDeploymentsCommands(program);
   registerListCommand(program);
   registerUrlCommand(program);
   registerDeleteCommand(program);

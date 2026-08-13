@@ -158,9 +158,12 @@ async def site_detail(
     custom_domains_available = capability.control_ready
     custom_domains_configured = capability.status != "disabled"
     with database.connect() as conn:
-        store = SiteStore(conn, settings.sites_dir)
+        store = SiteStore(
+            conn, settings.sites_dir, deployments_dir=settings.deployments_dir
+        )
         site = store.get_by_name(name, identity.user.id)
         files = store.list_files(name, identity.user.id)
+        deployments = store.list_deployments(name, identity.user.id)
         claim_store = DomainClaimStore(conn)
         views = claim_views_for_site(
             conn, name, statuses=frozenset({"pending", "verified"})
@@ -210,6 +213,7 @@ async def site_detail(
         "site": site,
         "site_url": site_url,
         "files": files,
+        "deployments": deployments,
         "domain": domain,
         "custom_domains_available": custom_domains_available,
         "custom_domains_configured": custom_domains_configured,

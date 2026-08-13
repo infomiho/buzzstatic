@@ -4,6 +4,19 @@ Self-hosted static site hosting. Sites deploy to subdomains of the Buzz domain; 
 
 ## Language
 
+### Sites
+
+**Site deployment**:
+One immutable set of files published for a site. Deployments are numbered per site, and exactly one deployment is live at a time after the site moves beyond legacy storage.
+_Avoid_: release, version
+
+**Live deployment**:
+The site deployment currently served through the permanent Buzz URL and every activated claim. Making another deployment live changes site content only; Access, claims, and analytics remain attached to the site.
+_Avoid_: active deployment, current version, live release
+
+**Deployment provenance**:
+The immutable actor, credential, and source recorded when a site deployment is created. The actor is the authenticated GitHub login. The optional credential is the deployment-token name. The source is Dashboard or API; CLI deployments use API because the server does not trust client-declared provenance.
+
 ### Custom domains
 
 **Claim**:

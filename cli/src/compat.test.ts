@@ -28,28 +28,13 @@ describe("checkServerCompatibility", () => {
     await expect(check).rejects.toThrow(/minimum version this server supports/);
   });
 
-  it("skips servers without a version endpoint", async () => {
+  it.each([
+    ["missing endpoint", fetchOnce(new Response("Not Found", { status: 404 }))],
+    ["malformed response", fetchOnce(Response.json({ status: "ok" }))],
+    ["unreachable server", async () => { throw new Error("connect ECONNREFUSED"); }],
+  ] as const)("skips a %s", async (_case, fetchFn) => {
     await expect(
-      checkServerCompatibility(
-        cliOptions,
-        fetchOnce(new Response("Not Found", { status: 404 }))
-      )
-    ).resolves.toBeUndefined();
-  });
-
-  it("skips malformed version responses", async () => {
-    await expect(
-      checkServerCompatibility(cliOptions, fetchOnce(Response.json({ status: "ok" })))
-    ).resolves.toBeUndefined();
-  });
-
-  it("skips unreachable servers", async () => {
-    const failingFetch: typeof fetch = async () => {
-      throw new Error("connect ECONNREFUSED");
-    };
-
-    await expect(
-      checkServerCompatibility(cliOptions, failingFetch)
+      checkServerCompatibility(cliOptions, fetchFn)
     ).resolves.toBeUndefined();
   });
 });

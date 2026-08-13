@@ -10,12 +10,13 @@ import threading
 import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from sqlite3 import Connection, OperationalError, Row
 from typing import BinaryIO
 
 from .access import hold_publication_guard, release_publication_guard
+from .serving_content_roots import ServingContentRoots
 from .custom_domains import ClaimConflict, DomainClaimStore
 from .environment import environment_value
 from .exceptions import BadRequest, Forbidden, NotFound, PayloadTooLarge
@@ -25,6 +26,7 @@ _EOCD_SIGNATURE = b"PK\x05\x06"
 _ZIP64_EOCD_SIGNATURE = b"PK\x06\x06"
 _ZIP64_LOCATOR_SIGNATURE = b"PK\x06\x07"
 _OPERATIONS_DIR = ".operations"
+_RETAINED_DEPLOYMENTS = 10
 # Per-process locks: deploy/delete mutual exclusion (and the journal design
 # built on it) assumes a single server process.
 _SITE_LOCKS = tuple(threading.Lock() for _ in range(64))
@@ -44,7 +46,19 @@ class SiteRecord:
     name: str
     owner_id: int | None
     size_bytes: int
-    created_at: str
+    last_deployed_at: str
+    deployment_number: int | None = None
+
+
+@dataclass(frozen=True)
+class SiteDeployment:
+    deployment_number: int
+    deployed_at: str
+    size_bytes: int
+    source: str
+    actor: str
+    credential: str | None
+    active: bool
 
 
 @dataclass
@@ -61,10 +75,14 @@ class SiteStore:
         conn: Connection,
         sites_dir: Path,
         limits: DeploymentLimits | None = None,
+        deployments_dir: Path | None = None,
+        content_roots: ServingContentRoots | None = None,
     ):
         self._conn = conn
         self._sites_dir = sites_dir
+        self._deployments_dir = deployments_dir or sites_dir / ".deployments"
         self._limits = limits or DeploymentLimits()
+        self._content_roots = content_roots
 
     def deploy(
         self,
@@ -72,22 +90,35 @@ class SiteStore:
         archive: BinaryIO,
         owner_id: int,
         configure: Callable[[Connection], None] | None = None,
+        *,
+        source: str = "api",
+        actor: str = "API",
+        credential: str | None = None,
     ) -> SiteRecord:
         with self._site_lock(subdomain):
             self._ensure_can_deploy(subdomain, owner_id)
-            self._sites_dir.mkdir(parents=True, exist_ok=True)
+            deployment_parent = self._deployments_dir / subdomain
+            deployment_parent.mkdir(parents=True, exist_ok=True)
             with tempfile.TemporaryDirectory(
-                prefix=f".{subdomain}-stage-", dir=self._sites_dir
+                prefix=".stage-", dir=deployment_parent
             ) as tmp_dir:
                 staging_dir = Path(tmp_dir)
                 size_bytes = self._extract_archive(archive, staging_dir)
                 return self._publish(
-                    subdomain, staging_dir, size_bytes, owner_id, configure
+                    subdomain,
+                    staging_dir,
+                    size_bytes,
+                    owner_id,
+                    source,
+                    actor,
+                    credential,
+                    configure,
                 )
 
     def list_for_owner(self, owner_id: int) -> list[SiteRecord]:
         rows = self._conn.execute(
-            "SELECT name, created_at, size_bytes, owner_id FROM sites WHERE owner_id = ? ORDER BY created_at DESC",
+            "SELECT name, created_at, size_bytes, owner_id FROM sites "
+            "WHERE owner_id = ? ORDER BY created_at DESC",
             (owner_id,),
         ).fetchall()
         return [self._record_from_row(r) for r in rows]
@@ -97,7 +128,7 @@ class SiteStore:
 
     def list_files(self, name: str, owner_id: int) -> list[FileEntry]:
         self._require_access(name, owner_id)
-        site_dir = self._sites_dir / name
+        site_dir = self._serving_content_root(name)
         if not site_dir.exists():
             return []
 
@@ -123,12 +154,86 @@ class SiteStore:
         entries.sort(key=sort_key)
         return entries
 
+    def list_deployments(self, name: str, owner_id: int) -> list[SiteDeployment]:
+        self._require_access(name, owner_id)
+        rows = self._conn.execute(
+            "SELECT deployments.*, active.deployment_number IS NOT NULL AS active "
+            "FROM site_deployments AS deployments "
+            "LEFT JOIN active_site_deployments AS active "
+            "ON active.site_name = deployments.site_name "
+            "AND active.deployment_number = deployments.deployment_number "
+            "WHERE deployments.site_name = ? "
+            "ORDER BY deployments.deployment_number DESC",
+            (name,),
+        ).fetchall()
+        return [self._deployment_from_row(row) for row in rows]
+
+    def activate_deployment(
+        self, name: str, deployment_number: int, owner_id: int
+    ) -> SiteDeployment:
+        with self._site_lock(name):
+            self._begin_write()
+            try:
+                self._require_access(name, owner_id)
+                row = self._conn.execute(
+                    "SELECT * FROM site_deployments "
+                    "WHERE site_name = ? AND deployment_number = ?",
+                    (name, deployment_number),
+                ).fetchone()
+                if not row:
+                    raise NotFound(
+                        f"Deployment {deployment_number} not found for site '{name}'"
+                    )
+                deployment_dir = self._deployment_path(name, deployment_number)
+                if not deployment_dir.is_dir():
+                    raise RuntimeError(
+                        f"Deployment {deployment_number} for site '{name}' is missing"
+                    )
+                self._conn.execute(
+                    "INSERT INTO active_site_deployments (site_name, deployment_number) "
+                    "VALUES (?, ?) ON CONFLICT(site_name) DO UPDATE SET "
+                    "deployment_number = excluded.deployment_number",
+                    (name, deployment_number),
+                )
+                self._conn.execute(
+                    "UPDATE sites SET size_bytes = ? WHERE name = ?",
+                    (row["size_bytes"], name),
+                )
+                self._conn.commit()
+            except Exception:
+                if self._conn.in_transaction:
+                    self._conn.rollback()
+                raise
+            if self._content_roots:
+                self._content_roots.replace(name, deployment_dir)
+            return SiteDeployment(
+                deployment_number=deployment_number,
+                deployed_at=row["deployed_at"],
+                size_bytes=row["size_bytes"],
+                source=row["source"],
+                actor=row["actor"],
+                credential=row["credential"],
+                active=True,
+            )
+
     def delete(self, name: str, owner_id: int) -> None:
         with self._site_lock(name):
             site_dir = self._sites_dir / name
+            deployments_dir = self._deployments_dir / name
             backup_dir: Path | None = None
+            deployments_backup_dir: Path | None = None
             operation_written = False
             transaction_started = False
+            previous_content_root: Path | None = None
+            self._require_access(name, owner_id)
+            if DomainClaimStore(self._conn).has_active_claim(name):
+                raise ClaimConflict(
+                    "Remove all of the site's custom domains before deleting the site"
+                )
+            self._conn.commit()
+            if self._content_roots:
+                previous_content_root = self._content_roots.stop_serving(name)
+                self._content_roots.wait_until_idle(name)
             try:
                 self._begin_write()
                 transaction_started = True
@@ -137,15 +242,21 @@ class SiteStore:
                     raise ClaimConflict(
                         "Remove all of the site's custom domains before deleting the site"
                     )
-
                 if site_dir.exists() or site_dir.is_symlink():
                     backup_dir = self._backup_path(name)
+                if deployments_dir.exists():
+                    deployments_backup_dir = self._deployments_backup_path(name)
                 self._write_operation(
                     name,
                     {
                         "type": "delete",
                         "site": name,
                         "backup": backup_dir.name if backup_dir else None,
+                        "deployments_backup": (
+                            deployments_backup_dir.name
+                            if deployments_backup_dir
+                            else None
+                        ),
                     },
                 )
                 operation_written = True
@@ -153,6 +264,9 @@ class SiteStore:
                 if backup_dir:
                     site_dir.rename(backup_dir)
                     self._sync_directory(self._sites_dir)
+                if deployments_backup_dir:
+                    deployments_dir.rename(deployments_backup_dir)
+                    self._sync_directory(self._deployments_dir)
 
                 self._conn.execute("DELETE FROM sites WHERE name = ?", (name,))
                 self._delete_related_rows(name)
@@ -162,14 +276,24 @@ class SiteStore:
                     if backup_dir and backup_dir.exists():
                         backup_dir.rename(site_dir)
                         self._sync_directory(self._sites_dir)
+                    if deployments_backup_dir and deployments_backup_dir.exists():
+                        deployments_backup_dir.rename(deployments_dir)
+                        self._sync_directory(self._deployments_dir)
                 finally:
                     if transaction_started and self._conn.in_transaction:
                         self._conn.rollback()
                 if operation_written:
                     self._clear_operation(name)
+                if self._content_roots and previous_content_root:
+                    self._content_roots.replace(name, previous_content_root)
                 raise
             else:
                 cleanup_succeeded = not backup_dir or self._discard_path(backup_dir)
+                if deployments_backup_dir:
+                    cleanup_succeeded = (
+                        self._discard_path(deployments_backup_dir)
+                        and cleanup_succeeded
+                    )
                 if cleanup_succeeded:
                     self._clear_operation(name)
 
@@ -217,6 +341,56 @@ class SiteStore:
                 release_publication_guard(self._conn, row["site_name"])
         self._conn.commit()
 
+        deployment_sites = (
+            self._deployments_dir.iterdir()
+            if self._deployments_dir.is_dir()
+            else ()
+        )
+        for site_dir in deployment_sites:
+            if not site_dir.is_dir() or site_dir.name.startswith("."):
+                continue
+            for staging_dir in site_dir.glob(".stage-*"):
+                self._discard_path(staging_dir)
+            self._discard_unreferenced_deployments(site_dir.name)
+        deployments = self._conn.execute(
+            "SELECT deployments.site_name, deployments.deployment_number, "
+            "active.deployment_number IS NOT NULL AS active "
+            "FROM site_deployments AS deployments "
+            "LEFT JOIN active_site_deployments AS active "
+            "ON active.site_name = deployments.site_name "
+            "AND active.deployment_number = deployments.deployment_number"
+        ).fetchall()
+        missing = [
+            (row["site_name"], row["deployment_number"])
+            for row in deployments
+            if not self._deployment_path(
+                row["site_name"], row["deployment_number"]
+            ).is_dir()
+        ]
+        if missing:
+            missing_active = [
+                (row["site_name"], row["deployment_number"])
+                for row in deployments
+                if row["active"]
+                and (row["site_name"], row["deployment_number"]) in missing
+            ]
+            if missing_active:
+                site_name, deployment_number = missing_active[0]
+                raise RuntimeError(
+                    f"Deployment {deployment_number} for site '{site_name}' is missing"
+                )
+            self._conn.executemany(
+                "DELETE FROM site_deployments WHERE site_name = ? AND deployment_number = ?",
+                missing,
+            )
+            self._conn.commit()
+            for site_name, deployment_number in missing:
+                logger.warning(
+                    "Removed unavailable deployment %s for site %r from history",
+                    deployment_number,
+                    site_name,
+                )
+
     def _site_row(self, name: str) -> Row | None:
         return self._conn.execute(
             "SELECT name, created_at, size_bytes, owner_id FROM sites WHERE name = ?",
@@ -237,7 +411,7 @@ class SiteStore:
             name=row["name"],
             owner_id=row["owner_id"],
             size_bytes=row["size_bytes"],
-            created_at=row["created_at"],
+            last_deployed_at=row["created_at"],
         )
 
     def _extract_archive(self, archive: BinaryIO, staging_dir: Path) -> int:
@@ -434,14 +608,14 @@ class SiteStore:
         staging_dir: Path,
         size_bytes: int,
         owner_id: int,
+        source: str,
+        actor: str,
+        credential: str | None,
         configure: Callable[[Connection], None] | None = None,
     ) -> SiteRecord:
-        site_dir = self._sites_dir / subdomain
-        backup_dir: Path | None = None
-        operation_written = False
-        published = False
+        deployment_dir: Path | None = None
         transaction_started = False
-        now = datetime.now().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         publication_guarded = configure is not None
 
         if publication_guarded:
@@ -458,6 +632,15 @@ class SiteStore:
                 if existing and existing["owner_id"] is not None
                 else owner_id
             )
+            deployment_number = self._next_deployment_number(subdomain)
+            deployment_dir = self._deployment_path(subdomain, deployment_number)
+            if deployment_dir.exists() and not self._discard_path(deployment_dir):
+                raise RuntimeError(
+                    f"Could not remove orphaned deployment {deployment_number} "
+                    f"for site '{subdomain}'"
+                )
+            staging_dir.rename(deployment_dir)
+            self._sync_directory(deployment_dir.parent)
 
             if existing:
                 self._conn.execute(
@@ -470,57 +653,116 @@ class SiteStore:
                     (subdomain, size_bytes, now, owner_id),
                 )
 
+            self._conn.execute(
+                "INSERT INTO site_deployments "
+                "(site_name, deployment_number, deployed_at, size_bytes, source, actor, credential) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (subdomain, deployment_number, now, size_bytes, source, actor, credential),
+            )
+            self._conn.execute(
+                "INSERT INTO active_site_deployments (site_name, deployment_number) "
+                "VALUES (?, ?) ON CONFLICT(site_name) DO UPDATE SET "
+                "deployment_number = excluded.deployment_number",
+                (subdomain, deployment_number),
+            )
+
             if configure:
                 configure(self._conn)
                 release_publication_guard(self._conn, subdomain)
-
-            if site_dir.exists() or site_dir.is_symlink():
-                backup_dir = self._backup_path(subdomain)
-            self._write_operation(
-                subdomain,
-                {
-                    "type": "deploy",
-                    "site": subdomain,
-                    "created_at": now,
-                    "staging": staging_dir.name,
-                    "backup": backup_dir.name if backup_dir else None,
-                    "had_site": bool(backup_dir),
-                },
-            )
-            operation_written = True
-
-            if backup_dir:
-                site_dir.rename(backup_dir)
-            staging_dir.rename(site_dir)
-            published = True
-            self._sync_directory(self._sites_dir)
+            pruned_deployments = self._prune_deployments(subdomain)
             self._conn.commit()
         except Exception:
-            try:
-                if published and (site_dir.exists() or site_dir.is_symlink()):
-                    self._remove_path(site_dir)
-                if backup_dir and backup_dir.exists():
-                    backup_dir.rename(site_dir)
-                self._sync_directory(self._sites_dir)
-            finally:
-                if transaction_started and self._conn.in_transaction:
-                    self._conn.rollback()
-            if operation_written:
-                self._clear_operation(subdomain)
+            if transaction_started and self._conn.in_transaction:
+                self._conn.rollback()
+            if deployment_dir:
+                self._discard_path(deployment_dir)
             if publication_guarded:
                 release_publication_guard(self._conn, subdomain)
                 self._conn.commit()
             raise
-        else:
-            cleanup_succeeded = not backup_dir or self._discard_path(backup_dir)
-            if cleanup_succeeded:
-                self._clear_operation(subdomain)
+
+        previous_content_root = None
+        if self._content_roots:
+            previous_content_root = self._content_roots.replace(subdomain, deployment_dir)
+        legacy_root = self._sites_dir / subdomain
+        if previous_content_root == legacy_root:
+            self._content_roots.discard_when_unused(legacy_root, self._discard_path)
+        elif self._content_roots is None and legacy_root.exists():
+            self._discard_path(legacy_root)
+        for number in pruned_deployments:
+            path = self._deployment_path(subdomain, number)
+            if self._content_roots:
+                self._content_roots.discard_when_unused(path, self._discard_path)
+            else:
+                self._discard_path(path)
 
         return SiteRecord(
             name=subdomain,
             owner_id=effective_owner,
             size_bytes=size_bytes,
-            created_at=now,
+            last_deployed_at=now,
+            deployment_number=deployment_number,
+        )
+
+    def _next_deployment_number(self, name: str) -> int:
+        row = self._conn.execute(
+            "SELECT COALESCE(MAX(deployment_number), 0) + 1 "
+            "FROM site_deployments WHERE site_name = ?",
+            (name,),
+        ).fetchone()
+        return row[0]
+
+    def _deployment_path(self, name: str, deployment_number: int) -> Path:
+        return self._deployments_dir / name / str(deployment_number)
+
+    def _prune_deployments(self, name: str) -> list[int]:
+        rows = self._conn.execute(
+            "SELECT deployment_number FROM site_deployments WHERE site_name = ? "
+            "ORDER BY deployment_number DESC LIMIT -1 OFFSET ?",
+            (name, _RETAINED_DEPLOYMENTS),
+        ).fetchall()
+        self._conn.execute(
+            "DELETE FROM site_deployments WHERE site_name = ? AND deployment_number NOT IN ("
+            "SELECT deployment_number FROM site_deployments WHERE site_name = ? "
+            "ORDER BY deployment_number DESC LIMIT ?)",
+            (name, name, _RETAINED_DEPLOYMENTS),
+        )
+        return [row["deployment_number"] for row in rows]
+
+    def _discard_unreferenced_deployments(self, name: str) -> None:
+        site_dir = self._deployments_dir / name
+        rows = self._conn.execute(
+            "SELECT deployment_number FROM site_deployments WHERE site_name = ?",
+            (name,),
+        ).fetchall()
+        referenced = {str(row["deployment_number"]) for row in rows}
+        for path in site_dir.iterdir():
+            if path.name.startswith(".stage-") or not path.name.isdigit():
+                continue
+            if path.name not in referenced and not self._discard_path(path):
+                raise RuntimeError(
+                    f"Could not remove orphaned deployment {path.name} for site '{name}'"
+                )
+
+    def _serving_content_root(self, name: str) -> Path:
+        row = self._conn.execute(
+            "SELECT deployment_number FROM active_site_deployments WHERE site_name = ?",
+            (name,),
+        ).fetchone()
+        if row:
+            return self._deployment_path(name, row["deployment_number"])
+        return self._sites_dir / name
+
+    @staticmethod
+    def _deployment_from_row(row: Row) -> SiteDeployment:
+        return SiteDeployment(
+            deployment_number=row["deployment_number"],
+            deployed_at=row["deployed_at"],
+            size_bytes=row["size_bytes"],
+            source=row["source"],
+            actor=row["actor"],
+            credential=row["credential"],
+            active=bool(row["active"]),
         )
 
     def _ensure_can_deploy(
@@ -540,6 +782,14 @@ class SiteStore:
 
     def _backup_path(self, name: str) -> Path:
         backup_dir = Path(tempfile.mkdtemp(prefix=f".{name}-backup-", dir=self._sites_dir))
+        backup_dir.rmdir()
+        return backup_dir
+
+    def _deployments_backup_path(self, name: str) -> Path:
+        self._deployments_dir.mkdir(parents=True, exist_ok=True)
+        backup_dir = Path(
+            tempfile.mkdtemp(prefix=f".{name}-delete-", dir=self._deployments_dir)
+        )
         backup_dir.rmdir()
         return backup_dir
 
@@ -586,7 +836,9 @@ class SiteStore:
         staging_dir = self._operation_child(operation["staging"])
         backup_dir = self._operation_child(operation.get("backup"))
         row = self._site_row(name)
-        committed = bool(row and row["created_at"] == operation["created_at"])
+        committed = bool(
+            row and row["created_at"] == operation["created_at"]
+        )
 
         if committed:
             cleanup_succeeded = not backup_dir or self._discard_path(backup_dir)
@@ -609,15 +861,29 @@ class SiteStore:
         name = operation["site"]
         site_dir = self._sites_dir / name
         backup_dir = self._operation_child(operation.get("backup"))
+        deployments_backup_dir = self._deployment_operation_child(
+            operation.get("deployments_backup")
+        )
+        deployments_dir = self._deployments_dir / name
         committed = self._site_row(name) is None
 
         if committed:
-            return not backup_dir or self._discard_path(backup_dir)
+            legacy_removed = not backup_dir or self._discard_path(backup_dir)
+            deployments_removed = (
+                not deployments_backup_dir
+                or self._discard_path(deployments_backup_dir)
+            )
+            return legacy_removed and deployments_removed
         if backup_dir and backup_dir.exists():
             if site_dir.exists() or site_dir.is_symlink():
                 self._remove_path(site_dir)
             backup_dir.rename(site_dir)
             self._sync_directory(self._sites_dir)
+        if deployments_backup_dir and deployments_backup_dir.exists():
+            if deployments_dir.exists():
+                self._remove_path(deployments_dir)
+            deployments_backup_dir.rename(deployments_dir)
+            self._sync_directory(self._deployments_dir)
         return True
 
     def _operation_child(self, name: str | None) -> Path | None:
@@ -626,6 +892,13 @@ class SiteStore:
         if Path(name).name != name:
             raise ValueError("invalid operation path")
         return self._sites_dir / name
+
+    def _deployment_operation_child(self, name: str | None) -> Path | None:
+        if name is None:
+            return None
+        if Path(name).name != name:
+            raise ValueError("invalid deployment operation path")
+        return self._deployments_dir / name
 
     @staticmethod
     def _remove_path(path: Path) -> None:

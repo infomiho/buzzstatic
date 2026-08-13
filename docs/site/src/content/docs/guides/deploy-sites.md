@@ -30,7 +30,9 @@ Deploy the new build with the same site name:
 buzz deploy ./dist --site my-site
 ```
 
-A successful redeployment replaces the complete previous file set. Files omitted from the new build are removed from the hosted site. If validation or publishing fails, Buzz leaves the previous deployment in place.
+A successful redeployment creates a numbered, immutable deployment and makes it live. Files omitted from the new build are not part of the new deployment. If validation or publishing fails, Buzz keeps serving the previous deployment.
+
+Buzz retains the 10 most recent deployments for each site. Older deployments and their files are removed automatically. List retained deployments with `buzz deployments list`, or make one live with `buzz deployments use <deployment-number>`.
 
 ![Buzz staging and publish lifecycle preserving the previous site on deployment failure](../../../assets/diagrams/replacement-deployment-lifecycle.svg)
 

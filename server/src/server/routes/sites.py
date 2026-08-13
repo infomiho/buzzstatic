@@ -7,8 +7,14 @@ from starlette.datastructures import UploadFile
 
 from ..access import AccessService
 from ..analytics import AnalyticsStore
-from ..api_models import DeploymentResponse, ErrorResponse, SiteResponse
+from ..api_models import (
+    DeploySiteResponse,
+    ErrorResponse,
+    SiteDeploymentResponse,
+    SiteResponse,
+)
 from ..db import Database
+from ..serving_content_roots import ServingContentRoots
 from ..dependencies import (
     Identity,
     get_database,
@@ -25,17 +31,26 @@ from ..utils import generate_subdomain
 router = APIRouter()
 
 
-def validate_subdomain(subdomain: str) -> str:
+def validate_site_name(site_name: str) -> str:
     try:
-        return validated_subdomain(subdomain)
+        return validated_subdomain(site_name)
     except InvalidSubdomain:
         raise BadRequest("Invalid site name")
 
 
-def build_site_url(subdomain: str, domain: str | None, fallback_port: int) -> str:
+def build_site_url(site_name: str, domain: str | None, fallback_port: int) -> str:
     if domain:
-        return f"https://{subdomain}.{domain}"
-    return f"http://{subdomain}.localhost:{fallback_port}"
+        return f"https://{site_name}.{domain}"
+    return f"http://{site_name}.localhost:{fallback_port}"
+
+
+def deployment_actor(identity: Identity) -> str:
+    if identity.token_type != "deploy":
+        return identity.user.github_login
+    name = "".join(
+        char for char in (identity.token_name or "") if char.isprintable()
+    ).strip()
+    return name[:100] or "Deployment token"
 
 
 def _deployment_limits(settings: Settings) -> DeploymentLimits:
@@ -50,28 +65,75 @@ def _deployment_limits(settings: Settings) -> DeploymentLimits:
 def _deploy_site(
     database: Database,
     settings: Settings,
-    subdomain: str,
+    site_name: str,
     archive: BinaryIO,
     owner_id: int,
+    source: str,
+    actor: str,
+    credential: str | None,
     configure: Callable | None,
+    content_roots: ServingContentRoots,
 ) -> SiteRecord:
     with database.connect() as conn:
-        store = SiteStore(conn, settings.sites_dir, _deployment_limits(settings))
-        return store.deploy(subdomain, archive, owner_id, configure)
+        store = SiteStore(
+            conn,
+            settings.sites_dir,
+            _deployment_limits(settings),
+            settings.deployments_dir,
+            content_roots,
+        )
+        return store.deploy(
+            site_name,
+            archive,
+            owner_id,
+            configure,
+            source=source,
+            actor=actor,
+            credential=credential,
+        )
 
 
-def _delete_site(database: Database, settings: Settings, name: str, owner_id: int) -> None:
+def _delete_site(
+    database: Database,
+    settings: Settings,
+    name: str,
+    owner_id: int,
+    content_roots: ServingContentRoots,
+) -> None:
     with database.connect() as conn:
-        SiteStore(conn, settings.sites_dir).delete(name, owner_id)
+        SiteStore(
+            conn,
+            settings.sites_dir,
+            deployments_dir=settings.deployments_dir,
+            content_roots=content_roots,
+        ).delete(name, owner_id)
+
+
+def _activate_site_deployment(
+    database: Database,
+    settings: Settings,
+    name: str,
+    deployment_number: int,
+    owner_id: int,
+    content_roots: ServingContentRoots,
+):
+    with database.connect() as conn:
+        return SiteStore(
+            conn,
+            settings.sites_dir,
+            deployments_dir=settings.deployments_dir,
+            content_roots=content_roots,
+        ).activate_deployment(name, deployment_number, owner_id)
 
 
 @router.post(
     "/deploy",
-    response_model=DeploymentResponse,
+    response_model=DeploySiteResponse,
     operation_id="deploySite",
     summary="Deploy a site",
     description=(
-        "Upload a ZIP archive to create or replace a site. A deployment token may "
+        "Upload a ZIP archive as a new deployment. It becomes active immediately. "
+        "Buzz creates the site if needed. A deployment token may "
         "deploy only to its assigned site and must send that name in X-Buzz-Site."
     ),
     responses={
@@ -117,7 +179,7 @@ async def deploy(
     identity: Identity = Depends(require_deploy_identity),
     x_buzz_site: str | None = Header(
         default=None,
-        description="Site name to create or replace. Buzz generates a name when omitted.",
+        description="Site to deploy to. Buzz generates a name when omitted.",
     ),
     x_subdomain: str | None = Header(default=None, include_in_schema=False),
     x_buzz_access: str | None = Header(
@@ -133,10 +195,10 @@ async def deploy(
             "X-Subdomain was replaced by X-Buzz-Site. Upgrade the Buzz CLI "
             "(npm i -g @infomiho/buzz-cli) or send X-Buzz-Site instead."
         )
-    subdomain = validate_subdomain(x_buzz_site) if x_buzz_site else generate_subdomain()
-    if not identity.can_deploy_to(subdomain):
+    site_name = validate_site_name(x_buzz_site) if x_buzz_site else generate_subdomain()
+    if not identity.can_deploy_to(site_name):
         raise Forbidden(
-            f"Deploy token is scoped to site '{identity.site_name}', cannot deploy to '{subdomain}'"
+            f"Deploy token is scoped to site '{identity.site_name}', cannot deploy to '{site_name}'"
         )
     make_private = False
     if x_buzz_access is not None:
@@ -145,6 +207,9 @@ async def deploy(
         if x_buzz_access != "private":
             raise BadRequest("X-Buzz-Access must be 'private'")
         make_private = True
+    source = "api" if request.headers.get("authorization") else "dashboard"
+    actor = identity.user.github_login
+    credential = deployment_actor(identity) if identity.token_type == "deploy" else None
 
     async with request.form(max_files=1, max_fields=1) as form:
         file = form.get("file")
@@ -158,7 +223,7 @@ async def deploy(
         await file.seek(0)
         configure = (
             request.app.state.access.begin_private_publication(
-                subdomain, identity.user.id
+                site_name, identity.user.id
             )
             if make_private
             else None
@@ -167,10 +232,14 @@ async def deploy(
             _deploy_site,
             database,
             settings,
-            subdomain,
+            site_name,
             file.file,
             identity.user.id,
+            source,
+            actor,
+            credential,
             configure,
+            request.app.state.content_roots,
         )
 
     # Report the site's actual visibility, not the flag that was passed: a
@@ -180,9 +249,56 @@ async def deploy(
 
     return {
         "name": record.name,
+        "site_name": record.name,
         "url": build_site_url(record.name, settings.domain, request.url.port or 8080),
         "private": private,
+        "deployment_number": record.deployment_number,
     }
+
+
+@router.get(
+    "/sites/{name}/deployments",
+    response_model=list[SiteDeploymentResponse],
+    operation_id="listSiteDeployments",
+    summary="List site deployments",
+)
+async def list_site_deployments(
+    name: str,
+    identity: Annotated[Identity, Depends(require_user)],
+    database: Annotated[Database, Depends(get_database)],
+    settings: Annotated[Settings, Depends(get_settings)],
+):
+    with database.connect() as conn:
+        deployments = SiteStore(
+            conn, settings.sites_dir, deployments_dir=settings.deployments_dir
+        ).list_deployments(name, identity.user.id)
+    return [deployment.__dict__ for deployment in deployments]
+
+
+@router.post(
+    "/sites/{name}/deployments/{deployment_number}/activate",
+    response_model=SiteDeploymentResponse,
+    operation_id="activateSiteDeployment",
+    summary="Activate a site deployment",
+)
+async def activate_site_deployment(
+    request: Request,
+    name: str,
+    deployment_number: int,
+    identity: Annotated[Identity, Depends(require_user)],
+    database: Annotated[Database, Depends(get_database)],
+    settings: Annotated[Settings, Depends(get_settings)],
+):
+    deployment = await run_in_threadpool(
+        _activate_site_deployment,
+        database,
+        settings,
+        name,
+        deployment_number,
+        identity.user.id,
+        request.app.state.content_roots,
+    )
+    return deployment.__dict__
 
 
 @router.get(
@@ -209,7 +325,8 @@ async def list_sites(
     return [
         {
             "name": site.name,
-            "created": site.created_at,
+            "created": site.last_deployed_at,
+            "last_deployed_at": site.last_deployed_at,
             "size_bytes": site.size_bytes,
             "total_views": views_by_site[site.name],
             "private": site.name in private_names,
@@ -237,10 +354,18 @@ async def list_sites(
     },
 )
 async def delete_site(
+    request: Request,
     name: str,
     identity: Annotated[Identity, Depends(require_user)],
     database: Annotated[Database, Depends(get_database)],
     settings: Annotated[Settings, Depends(get_settings)],
 ):
-    await run_in_threadpool(_delete_site, database, settings, name, identity.user.id)
+    await run_in_threadpool(
+        _delete_site,
+        database,
+        settings,
+        name,
+        identity.user.id,
+        request.app.state.content_roots,
+    )
     return Response(status_code=204)

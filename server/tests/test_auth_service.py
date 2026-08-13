@@ -111,44 +111,31 @@ class TestAuthenticate:
             ).fetchone()
         assert row["last_used_at"] is not None
 
-    def test_no_token_returns_none(self, database):
+    @pytest.mark.parametrize(
+        "authorization",
+        [None, "", "Bearer unknown_prefix_abc123", "Bearer "],
+    )
+    def test_malformed_or_missing_token_returns_none(self, database, authorization):
         auth = AuthService(db=database.connect)
-        assert auth.authenticate(None) is None
-        assert auth.authenticate("") is None
-
-    def test_unknown_prefix_returns_none(self, database):
-        auth = AuthService(db=database.connect)
-        assert auth.authenticate("Bearer unknown_prefix_abc123") is None
-
-    def test_bearer_only_returns_none(self, database):
-        auth = AuthService(db=database.connect)
-        assert auth.authenticate("Bearer ") is None
+        assert auth.authenticate(authorization) is None
 
 
 class TestCanDeployTo:
-    def test_session_token_can_deploy_anywhere(self):
+    @pytest.mark.parametrize(
+        ("token_type", "scope", "site_name", "allowed"),
+        [
+            ("session", None, "any-site", True),
+            ("deploy", "my-site", "my-site", True),
+            ("deploy", "my-site", "other-site", False),
+        ],
+    )
+    def test_deployment_scope(self, token_type, scope, site_name, allowed):
         identity = Identity(
             user=User(id=1, github_login="alice", github_name="Alice"),
-            token_type="session",
+            token_type=token_type,
+            site_name=scope,
         )
-        assert identity.can_deploy_to("any-site") is True
-        assert identity.can_deploy_to("other-site") is True
-
-    def test_deploy_token_scoped_to_matching_site(self):
-        identity = Identity(
-            user=User(id=1, github_login="alice", github_name="Alice"),
-            token_type="deploy",
-            site_name="my-site",
-        )
-        assert identity.can_deploy_to("my-site") is True
-
-    def test_deploy_token_rejects_different_site(self):
-        identity = Identity(
-            user=User(id=1, github_login="alice", github_name="Alice"),
-            token_type="deploy",
-            site_name="my-site",
-        )
-        assert identity.can_deploy_to("other-site") is False
+        assert identity.can_deploy_to(site_name) is allowed
 
 
 class TestLoginWithGitHub:
@@ -282,6 +269,17 @@ class TestDeployTokenCrud:
         with pytest.raises(SiteNotFound):
             auth.create_deploy_token(user_id, "nonexistent", "token")
 
+    def test_create_strips_token_name(self, database):
+        with database.connect() as conn:
+            user_id = _insert_user(conn)
+            _insert_site(conn, "my-site", user_id)
+
+        created = AuthService(db=database.connect).create_deploy_token(
+            user_id, "my-site", "  CI deploy  "
+        )
+
+        assert created.name == "CI deploy"
+
     def test_create_not_owner(self, database):
         with database.connect() as conn:
             owner_id = _insert_user(conn, github_id=1, login="owner")
@@ -324,6 +322,7 @@ class TestDeployTokenCrud:
         assert identity is not None
         assert identity.token_type == "deploy"
         assert identity.site_name == "my-site"
+        assert identity.token_name == "Deployment token"
 
 
 class TestAccessControl:

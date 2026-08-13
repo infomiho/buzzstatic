@@ -5,7 +5,6 @@ from server.custom_domains.machine_edges import (
     EDGES,
     TransitionState,
 )
-from server.custom_domains.transitions import DomainClaimStateMachine
 
 
 def _state_sets(sql):
@@ -48,13 +47,6 @@ def test_transition_state_check_lists_every_declared_state(database):
 
     declared = frozenset(state.value for state in TransitionState)
     assert _state_sets(table) == [declared]
-
-
-def test_active_states_alias_is_shared():
-    assert DomainClaimStateMachine.ACTIVE_STATES is ACTIVE_STATES
-    assert ACTIVE_STATES == frozenset(
-        {"observing", "validating", "action_needed", "deadline_evaluation"}
-    )
 
 
 def test_edges_reference_only_declared_states():

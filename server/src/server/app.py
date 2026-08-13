@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlsplit
@@ -20,6 +21,7 @@ from . import __version__
 from .api_models import HealthResponse, VersionResponse
 from .auth_service import DEV_SESSION_ID, AuthService, Identity
 from .cookies import access_cookie_name, session_cookie_name, set_access_cookie
+from .serving_content_roots import ServingContentRoots
 from .custom_domains import (
     DOMAIN_CHECK_PREFIX,
     ClaimConflict,
@@ -43,7 +45,7 @@ from .site_path import (
     InvalidPath,
     InvalidSubdomain,
     normalized_url_path,
-    resolve_normalized_site_file,
+    resolve_normalized_content_file,
 )
 from .templating import STATIC_DIR, templates
 from .utils import extract_subdomain, is_control_host
@@ -69,6 +71,21 @@ CONTENT_TYPES = {
     ".txt": "text/plain",
     ".xml": "application/xml",
 }
+
+
+class ReleasingResponse(Response):
+    def __init__(self, response: Response, release: Callable[[], None]):
+        self._response = response
+        self._release = release
+        self.status_code = response.status_code
+        self.raw_headers = response.raw_headers
+        self.background = None
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        try:
+            await self._response(scope, receive, send)
+        finally:
+            self._release()
 
 
 class RevalidatedStaticFiles(StaticFiles):
@@ -150,9 +167,19 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
     custom_domains = CustomDomainsRuntime(
         CustomDomainsConfig.from_settings(settings), connect=database.connect
     )
+    content_roots = ServingContentRoots()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        with database.connect() as conn:
+            SiteStore(
+                conn,
+                settings.sites_dir,
+                deployments_dir=settings.deployments_dir,
+            ).reconcile()
+            content_roots.load(
+                conn, settings.sites_dir, settings.deployments_dir
+            )
         app.state.access.load_visibility()
         await custom_domains.start()
         analytics_started = False
@@ -244,6 +271,7 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
     )
     app.state.analytics = AnalyticsRecorder(database.connect)
     app.state.custom_domains = custom_domains
+    app.state.content_roots = content_roots
 
     @app.exception_handler(BadRequest)
     async def bad_request_handler(request: Request, exc: BadRequest):
@@ -528,9 +556,26 @@ async def serve_site(request: Request, site_name: str, settings: Settings) -> Re
             media_type="text/plain",
             headers={"Cache-Control": "no-store"},
         )
-    return await serve_static(
-        request, site_name, path, settings, private=decision.protected
-    )
+    content_root, release_content_root = request.app.state.content_roots.acquire(site_name)
+    if not content_root or not content_root.is_dir():
+        release_content_root()
+        return Response(
+            content="Site not found", status_code=404, media_type="text/plain"
+        )
+    try:
+        response = await serve_static(
+            request,
+            site_name,
+            content_root,
+            path,
+            settings,
+            private=decision.protected,
+        )
+    except Exception:
+        release_content_root()
+        raise
+
+    return ReleasingResponse(response, release_content_root)
 
 
 def access_gate(
@@ -563,14 +608,12 @@ def access_gate(
 async def serve_static(
     request: Request,
     subdomain: str,
+    content_root: Path,
     path: str,
     settings: Settings,
     private: bool,
 ) -> Response:
-    try:
-        filepath = resolve_normalized_site_file(settings.sites_dir, subdomain, path)
-    except InvalidSubdomain:
-        return Response(content="Site not found", status_code=404, media_type="text/plain")
+    filepath = resolve_normalized_content_file(content_root, path)
 
     if filepath:
         content_type = CONTENT_TYPES.get(filepath.suffix.lower(), "application/octet-stream")
@@ -580,9 +623,8 @@ async def serve_static(
             protect_response(response)
         return response
 
-    site_dir = (settings.sites_dir / subdomain).resolve()
-    custom_404 = site_dir / "404.html"
-    if site_dir.is_dir() and custom_404.is_file():
+    custom_404 = content_root / "404.html"
+    if custom_404.is_file():
         record_analytics(request, subdomain, path, 404, custom_404.stat().st_size, "text/html", settings)
         response = FileResponse(custom_404, status_code=404, media_type="text/html")
         if private:

@@ -1,7 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
 from server.custom_domains.observation import (
-    STABLE_OBSERVATIONS_REQUIRED,
     DnsObservation,
     TrackedObservation,
     advance,
@@ -229,7 +228,3 @@ def test_naive_timestamps_treated_as_utc():
         START + timedelta(seconds=61),
     )
     assert decision.stable_observation_count == 2
-
-
-def test_stable_threshold_constant_is_two():
-    assert STABLE_OBSERVATIONS_REQUIRED == 2

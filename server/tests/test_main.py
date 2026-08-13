@@ -1,3 +1,5 @@
+import pytest
+
 from server.main import access_control_warning
 
 
@@ -7,13 +9,13 @@ def test_warns_when_nobody_can_log_in():
     assert "Nobody can log in" in warning
 
 
-def test_no_warning_when_registration_is_open():
-    assert access_control_warning(True, None, 0) is None
-
-
-def test_no_warning_when_allowlist_is_set():
-    assert access_control_warning(False, frozenset({"alice"}), 0) is None
-
-
-def test_no_warning_when_users_exist():
-    assert access_control_warning(False, None, 2) is None
+@pytest.mark.parametrize(
+    ("registration_open", "allowlist", "user_count"),
+    [
+        (True, None, 0),
+        (False, frozenset({"alice"}), 0),
+        (False, None, 2),
+    ],
+)
+def test_no_warning_when_somebody_can_log_in(registration_open, allowlist, user_count):
+    assert access_control_warning(registration_open, allowlist, user_count) is None

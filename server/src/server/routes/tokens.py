@@ -67,6 +67,8 @@ async def create_token(
         raise HTTPException(status_code=404, detail="Site not found")
     except NotSiteOwner:
         raise HTTPException(status_code=403, detail="You don't own this site")
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
 
     return {"id": result.id_prefix, "token": result.raw_token, "name": result.name, "site_name": result.site_name}
 

@@ -1,7 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import {
   addDomain,
   cancelTransition,
@@ -191,19 +188,6 @@ describe("domain commands", () => {
     expect(console.log).toHaveBeenCalledWith(
       "Point this hostname to Buzz using direct DNS or supported Cloudflare proxying:"
     );
-  });
-
-  it("does not change the canonical CNAME when adding a domain", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "buzz-domain-test-"));
-    const cname = join(directory, "CNAME");
-    writeFileSync(cname, "my-site\n");
-    fetchMock
-      .mockResolvedValueOnce(jsonResponse(capability()))
-      .mockResolvedValueOnce(jsonResponse(claim(), 201));
-
-    await addDomain("my-site", "www.example.com", cliOptions);
-
-    expect(readFileSync(cname, "utf8")).toBe("my-site\n");
   });
 
   it("checks the active claim selected by normalized hostname", async () => {

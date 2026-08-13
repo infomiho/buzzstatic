@@ -8,24 +8,14 @@ def make_store():
     return PendingStore(clock=clock), clock
 
 
-def test_get_returns_stored_value_without_removing_it():
+def test_get_and_consume_lifecycle():
     store, _ = make_store()
     store.put("key", {"state": 1}, ttl_seconds=60)
     assert store.get("key") == {"state": 1}
     assert store.get("key") == {"state": 1}
-
-
-def test_consume_removes_the_entry():
-    store, _ = make_store()
-    store.put("key", "value", ttl_seconds=60)
-    assert store.consume("key") == "value"
+    assert store.consume("key") == {"state": 1}
     assert store.consume("key") is None
-
-
-def test_unknown_key_returns_none():
-    store, _ = make_store()
     assert store.get("missing") is None
-    assert store.consume("missing") is None
 
 
 def test_entries_expire_after_ttl():

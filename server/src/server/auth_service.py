@@ -31,6 +31,7 @@ class Identity:
     token_type: str
     site_name: str | None = None
     session_id: str | None = None
+    token_name: str | None = None
 
     def can_deploy_to(self, subdomain: str) -> bool:
         if self.site_name is None:
@@ -325,6 +326,9 @@ class AuthService:
             conn.execute("DELETE FROM sessions WHERE id = ?", (_hash_token(token),))
 
     def create_deploy_token(self, user_id: int, site_name: str, name: str = "Deployment token") -> CreatedToken:
+        name = name.strip()
+        if not name or len(name) > 100 or not all(char.isprintable() for char in name):
+            raise ValueError("Token name must be 1 to 100 printable characters")
         with self._db() as conn:
             site = conn.execute("SELECT owner_id FROM sites WHERE name = ?", (site_name,)).fetchone()
         if not site:
@@ -373,7 +377,8 @@ class AuthService:
     def _resolve_deploy_token(self, token_hash: str, now: str) -> Identity | None:
         with self._db() as conn:
             row = conn.execute(
-                "SELECT dt.user_id, dt.site_name, u.github_login, u.github_name, "
+                "SELECT dt.user_id, dt.site_name, dt.name AS token_name, "
+                "u.github_login, u.github_name, "
                 "u.control_admitted "
                 "FROM deployment_tokens dt JOIN users u ON dt.user_id = u.id "
                 "WHERE dt.id = ? AND (dt.expires_at IS NULL OR dt.expires_at > ?)",
@@ -396,4 +401,5 @@ class AuthService:
             ),
             token_type="deploy",
             site_name=row["site_name"],
+            token_name=row["token_name"],
         )

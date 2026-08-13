@@ -9,7 +9,8 @@
 {% block content %}
 {% import "_icons.html" as icons %}
 {% set file_count = files | selectattr('is_dir', 'false') | list | length %}
-<div id="site-detail-root" class="flex flex-col gap-8" data-site-name="{{ site.name }}" data-created-at="{{ site.created_at }}">
+{% set active_deployment = deployments | selectattr('active') | first if deployments else none %}
+<div id="site-detail-root" class="flex flex-col gap-8" data-site-name="{{ site.name }}" data-last-deployed-at="{{ site.last_deployed_at }}">
     <!-- Back link -->
     <a href="/" class="link w-fit">Back to dashboard</a>
 
@@ -20,7 +21,7 @@
                 <a href="{{ site_url }}" target="_blank" class="text-link underline decoration-2 underline-offset-4 hover:decoration-4">{{ site.name }}</a><span>.{{ domain }}</span>
             </h1>
             <p class="mt-2 text-rule">
-                Last deployed <span id="site-deployed-at">{{ site.created_at[:10] }}</span>
+                {% if active_deployment %}Deployment {{ active_deployment.deployment_number }} live &middot; {% endif %}Last deployed <span id="site-deployed-at">{{ site.last_deployed_at[:10] }}</span>
                 &middot; {{ file_count }} file{{ 's' if file_count != 1 }}
                 &middot; {{ site.size_bytes | filesizeformat }}
             </p>
@@ -67,6 +68,39 @@
             <button class="btn-sm-outline" id="redeploy-site">Redeploy</button>
         </div>
     </div>
+
+    {% if deployments %}
+    <div class="card" id="deployments">
+        <header>
+            <h2>Deployments</h2>
+        </header>
+        <section class="p-0">
+            <ol class="divide-y-2 divide-ink">
+                {% for deployment in deployments %}
+                <li class="flex flex-col gap-3 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div class="min-w-0">
+                        <div class="flex flex-wrap items-center gap-3">
+                            <h3 class="text-lg font-bold">Deployment {{ deployment.deployment_number }}</h3>
+                            {% if deployment.active %}<span class="badge-live">Live</span>{% endif %}
+                        </div>
+                        <div class="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+                            <span class="inline-flex min-w-0 items-center gap-1.5">
+                                <img alt="" class="size-4 shrink-0" src="https://github.com/{{ deployment.actor }}.png?size=32">
+                                <span><strong>{{ deployment.actor }}</strong> deployed via {{ 'API' if deployment.source == 'api' else 'Dashboard' }}{% if deployment.credential %} using <strong>{{ deployment.credential }}</strong>{% endif %}</span>
+                            </span>
+                            <span class="hidden text-rule sm:inline" aria-hidden="true">&middot;</span>
+                            <time class="tabular-nums text-rule" data-deployment-time="{{ deployment.deployed_at }}">{{ deployment.deployed_at[:10] }}</time>
+                        </div>
+                    </div>
+                    {% if not deployment.active %}
+                    <button type="button" class="btn-sm-outline w-full shrink-0 sm:w-auto make-live-deployment" data-deployment-number="{{ deployment.deployment_number }}">Make live</button>
+                    {% endif %}
+                </li>
+                {% endfor %}
+            </ol>
+        </section>
+    </div>
+    {% endif %}
 
     <!-- Stats -->
     <div class="card">
@@ -371,6 +405,20 @@
 </div>
 
 {% include "_deploy_modal.html" %}
+
+<dialog id="make-live-deployment-dialog" class="dialog dialog-confirm" role="alertdialog" aria-labelledby="make-live-deployment-title" aria-describedby="make-live-deployment-description">
+    <div>
+        <header>
+            <h2 id="make-live-deployment-title">Make deployment live?</h2>
+            <p id="make-live-deployment-description">Visitors will immediately see deployment <strong id="make-live-deployment-number"></strong>. Site access and custom domains will not change.</p>
+            <p class="mt-3 hidden border-l-4 border-danger pl-3 text-danger-dark" id="make-live-deployment-error" role="alert"></p>
+        </header>
+        <footer>
+            <button type="button" class="btn-outline" id="cancel-make-live-deployment">Cancel</button>
+            <button type="button" class="btn" id="confirm-make-live-deployment">Make live</button>
+        </footer>
+    </div>
+</dialog>
 
 {% if access_policy %}
 <dialog id="manage-access-dialog" class="dialog" aria-labelledby="manage-access-title" aria-describedby="manage-access-description">

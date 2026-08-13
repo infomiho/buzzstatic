@@ -45,7 +45,8 @@ export function authHeaders(token?: string): Record<string, string> {
 
 export interface Site {
   name: string;
-  created: string;
+  created?: string;
+  last_deployed_at?: string;
   size_bytes: number;
   private: boolean;
 }
@@ -57,6 +58,7 @@ export function isSiteArray(value: unknown): value is Site[] {
       (site) =>
         isRecord(site) &&
         typeof site.name === "string" &&
+        (typeof site.last_deployed_at === "string" || typeof site.created === "string") &&
         typeof site.private === "boolean"
     )
   );

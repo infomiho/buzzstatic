@@ -5,15 +5,15 @@ import { getOptions, CliError, type CliOptions } from "../client.js";
 import { checkServerCompatibility } from "../compat.js";
 import { createProgressBar, createSpinner, formatSize } from "../lib.js";
 import {
-  resolveSubdomain,
+  resolveSiteName,
   packSite,
   uploadSite,
-  type UploadResult,
+  type DeployResult,
 } from "../deploy.js";
 
 export async function deploy(
   directory: string,
-  subdomain: string | undefined,
+  siteName: string | undefined,
   cliOptions: CliOptions = {},
   makePrivate = false
 ) {
@@ -25,7 +25,7 @@ export async function deploy(
 
   await checkServerCompatibility(cliOptions);
 
-  subdomain = resolveSubdomain(process.cwd(), directory, subdomain);
+  siteName = resolveSiteName(process.cwd(), directory, siteName);
 
   const progressBar = createProgressBar("Zipping");
   let progressStarted = false;
@@ -52,13 +52,13 @@ export async function deploy(
   const uploadSpinner = createSpinner("Uploading");
   uploadSpinner.start();
 
-  let result: UploadResult;
+  let result: DeployResult;
   try {
     result = await uploadSite(
       options.server,
       options.token,
       zipBuffer,
-      subdomain,
+      siteName,
       globalThis.fetch,
       makePrivate
     );
@@ -71,12 +71,15 @@ export async function deploy(
   console.log(
     `Deployed to ${result.url} (${result.private ? "private" : "public"})`
   );
-  writeFileSync(join(process.cwd(), "CNAME"), result.subdomain + "\n");
+  if (result.deploymentNumber !== undefined) {
+    console.log(`Deployment ${result.deploymentNumber}`);
+  }
+  writeFileSync(join(process.cwd(), "CNAME"), result.siteName + "\n");
 
   if (makePrivate && !result.private) {
     throw new CliError(
       `${result.url} was published publicly, but you asked for a private site.`,
-      `Run 'buzz access private --site ${result.subdomain}' to protect it, or 'buzz delete ${result.subdomain}' to remove the public copy.`
+      `Run 'buzz access private --site ${result.siteName}' to protect it, or 'buzz delete ${result.siteName}' to remove the public copy.`
     );
   }
 }
@@ -85,7 +88,7 @@ export function registerDeployCommand(program: Command) {
   program
     .command("deploy <directory>")
     .description("Deploy a directory to the server")
-    .option("--site <name>", "Site name to create or replace")
+    .option("--site <name>", "Site to deploy to (created if needed)")
     .option("--private", "Publish the site so only you can view it")
     .action(
       (directory: string, cmdOptions: { site?: string; private?: boolean }) =>

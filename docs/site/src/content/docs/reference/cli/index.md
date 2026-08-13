@@ -11,6 +11,9 @@ Use this reference to check command syntax and options. Start with [Deploy Your 
 ## Command Index
 
 - [`buzz deploy`](#buzz-deploy): Deploy a directory to the server
+- [`buzz deployments`](#buzz-deployments): List deployments or make one live
+- [`buzz deployments list`](#buzz-deployments-list): List deployments for a site
+- [`buzz deployments use`](#buzz-deployments-use): Make a deployment live for a site
 - [`buzz list`](#buzz-list): List sites owned by the signed-in user
 - [`buzz url`](#buzz-url): Show the URL for the current directory
 - [`buzz delete`](#buzz-delete): Delete a deployed site
@@ -49,6 +52,7 @@ Options:
 
 Sites:
   deploy [options] <directory>  Deploy a directory to the server
+  deployments                   List deployments or make one live
   list                          List sites owned by the signed-in user
   url                           Show the URL for the current directory
   delete [options] <site>       Delete a deployed site
@@ -78,8 +82,48 @@ Usage: buzz deploy [options] <directory>
 Deploy a directory to the server
 
 Options:
-  --site <name>  Site name to create or replace
+  --site <name>  Site to deploy to (created if needed)
   --private      Publish the site so only you can view it
+  -h, --help     display help for command
+```
+
+## buzz deployments
+
+```text
+Usage: buzz deployments [options] [command]
+
+List deployments or make one live
+
+Options:
+  -h, --help                         display help for command
+
+Commands:
+  list [options]                     List deployments for a site
+  use [options] <deployment-number>  Make a deployment live for a site
+  help [command]                     display help for command
+```
+
+## buzz deployments list
+
+```text
+Usage: buzz deployments list [options]
+
+List deployments for a site
+
+Options:
+  --site <site>  Site name (defaults to the current CNAME)
+  -h, --help     display help for command
+```
+
+## buzz deployments use
+
+```text
+Usage: buzz deployments use [options] <deployment-number>
+
+Make a deployment live for a site
+
+Options:
+  --site <site>  Site name (defaults to the current CNAME)
   -h, --help     display help for command
 ```
 

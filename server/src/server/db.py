@@ -118,6 +118,26 @@ def _principal_identities(conn: sqlite3.Connection) -> None:
         )
 
 
+def _site_deployments(conn: sqlite3.Connection) -> None:
+    conn.execute("""CREATE TABLE site_deployments (
+        site_name TEXT NOT NULL,
+        deployment_number INTEGER NOT NULL,
+        deployed_at DATETIME NOT NULL,
+        size_bytes INTEGER NOT NULL,
+        source TEXT NOT NULL CHECK(source IN ('dashboard', 'api')),
+        actor TEXT NOT NULL,
+        credential TEXT,
+        PRIMARY KEY (site_name, deployment_number),
+        FOREIGN KEY (site_name) REFERENCES sites(name) ON DELETE CASCADE)""")
+    conn.execute("""CREATE TABLE active_site_deployments (
+        site_name TEXT PRIMARY KEY,
+        deployment_number INTEGER NOT NULL,
+        FOREIGN KEY (site_name) REFERENCES sites(name) ON DELETE CASCADE,
+        FOREIGN KEY (site_name, deployment_number)
+            REFERENCES site_deployments(site_name, deployment_number)
+            ON DELETE CASCADE)""")
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     _base_schema,
     _custom_domain_claims,
@@ -135,6 +155,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     _buzz_access_site_level,
     _principal_identities,
     _buzz_access_readers,
+    _site_deployments,
 )
 
 

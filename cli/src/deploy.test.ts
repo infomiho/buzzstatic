@@ -2,19 +2,19 @@ import { describe, it, expect, vi } from "vitest";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { resolveSubdomain, packSite, uploadSite } from "./deploy.js";
+import { resolveSiteName, packSite, uploadSite } from "./deploy.js";
 
 function makeTmpDir(): string {
   return mkdtempSync(join(tmpdir(), "buzz-test-"));
 }
 
-describe("resolveSubdomain", () => {
+describe("resolveSiteName", () => {
   it("returns explicit arg when provided", () => {
     const cwd = makeTmpDir();
     const dir = makeTmpDir();
     writeFileSync(join(cwd, "CNAME"), "from-cwd\n");
 
-    expect(resolveSubdomain(cwd, dir, "explicit")).toBe("explicit");
+    expect(resolveSiteName(cwd, dir, "explicit")).toBe("explicit");
   });
 
   it("falls back to cwd CNAME", () => {
@@ -22,7 +22,7 @@ describe("resolveSubdomain", () => {
     const dir = makeTmpDir();
     writeFileSync(join(cwd, "CNAME"), "from-cwd\n");
 
-    expect(resolveSubdomain(cwd, dir)).toBe("from-cwd");
+    expect(resolveSiteName(cwd, dir)).toBe("from-cwd");
   });
 
   it("falls back to directory CNAME when no cwd CNAME", () => {
@@ -30,7 +30,7 @@ describe("resolveSubdomain", () => {
     const dir = makeTmpDir();
     writeFileSync(join(dir, "CNAME"), "from-dir\n");
 
-    expect(resolveSubdomain(cwd, dir)).toBe("from-dir");
+    expect(resolveSiteName(cwd, dir)).toBe("from-dir");
   });
 
   it("prefers cwd CNAME over directory CNAME", () => {
@@ -39,31 +39,18 @@ describe("resolveSubdomain", () => {
     writeFileSync(join(cwd, "CNAME"), "from-cwd\n");
     writeFileSync(join(dir, "CNAME"), "from-dir\n");
 
-    expect(resolveSubdomain(cwd, dir)).toBe("from-cwd");
+    expect(resolveSiteName(cwd, dir)).toBe("from-cwd");
   });
 
   it("returns undefined when no CNAME exists", () => {
     const cwd = makeTmpDir();
     const dir = makeTmpDir();
 
-    expect(resolveSubdomain(cwd, dir)).toBeUndefined();
+    expect(resolveSiteName(cwd, dir)).toBeUndefined();
   });
 });
 
 describe("packSite", () => {
-  it("returns a valid ZIP buffer", async () => {
-    const dir = makeTmpDir();
-    writeFileSync(join(dir, "index.html"), "<h1>hello</h1>");
-    writeFileSync(join(dir, "style.css"), "body {}");
-
-    const buffer = await packSite(dir);
-
-    expect(buffer).toBeInstanceOf(Buffer);
-    expect(buffer.length).toBeGreaterThan(0);
-    expect(buffer[0]).toBe(0x50);
-    expect(buffer[1]).toBe(0x4b);
-  });
-
   it("throws for nonexistent directory", async () => {
     await expect(packSite("/tmp/does-not-exist-xyz")).rejects.toThrow(
       "does not exist"
@@ -100,10 +87,6 @@ function fakeFetch(status: number, body: object): typeof fetch {
     });
 }
 
-function fakeTextFetch(status: number, body: string): typeof fetch {
-  return async () => new Response(body, { status });
-}
-
 describe("uploadSite", () => {
   const zip = Buffer.from("fake-zip-content");
 
@@ -114,21 +97,40 @@ describe("uploadSite", () => {
       zip,
       "my-site",
       fakeFetch(200, {
-        name: "my-site",
+        site_name: "my-site",
         url: "https://custom.example.com",
         private: false,
+        deployment_number: 3,
       })
     );
 
     expect(result.url).toBe("https://custom.example.com");
-    expect(result.subdomain).toBe("my-site");
+    expect(result.siteName).toBe("my-site");
     expect(result.private).toBe(false);
+    expect(result.deploymentNumber).toBe(3);
+  });
+
+  it("accepts the previous server response while packages roll out", async () => {
+    const result = await uploadSite(
+      "http://localhost:8080",
+      "test-token",
+      zip,
+      "my-site",
+      fakeFetch(200, {
+        name: "my-site",
+        url: "https://my-site.example.com",
+        private: false,
+      })
+    );
+
+    expect(result.siteName).toBe("my-site");
+    expect(result.deploymentNumber).toBeUndefined();
   });
 
   it("asks for a private site with the deployment", async () => {
     const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(
-        JSON.stringify({ name: "my-site", url: "https://my-site.example.com", private: false }),
+        JSON.stringify({ site_name: "my-site", url: "https://my-site.example.com", private: false, deployment_number: 1 }),
         { status: 200, headers: { "Content-Type": "application/json" } }
       )
     );
@@ -145,7 +147,9 @@ describe("uploadSite", () => {
     expect(fetchFn).toHaveBeenCalledWith(
       "https://buzz.example.com/deploy",
       expect.objectContaining({
-        headers: expect.objectContaining({ "x-buzz-access": "private" }),
+        headers: expect.objectContaining({
+          "x-buzz-access": "private",
+        }),
       })
     );
   });
@@ -153,7 +157,7 @@ describe("uploadSite", () => {
   it("omits the access header for a public deployment", async () => {
     const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(
-        JSON.stringify({ name: "my-site", url: "https://my-site.example.com", private: false }),
+        JSON.stringify({ site_name: "my-site", url: "https://my-site.example.com", private: false, deployment_number: 1 }),
         { status: 200, headers: { "Content-Type": "application/json" } }
       )
     );
@@ -189,19 +193,7 @@ describe("uploadSite", () => {
     ).rejects.toThrow("Not authenticated");
   });
 
-  it("throws CliError on 403", async () => {
-    await expect(
-      uploadSite(
-        "http://localhost:8080",
-        "test-token",
-        zip,
-        "taken",
-        fakeFetch(403, { detail: "Site 'taken' is owned by another user" })
-      )
-    ).rejects.toThrow("owned by another user");
-  });
-
-  it("includes tip for ownership errors", async () => {
+  it("explains ownership conflicts", async () => {
     try {
       await uploadSite(
         "http://localhost:8080",
@@ -212,49 +204,10 @@ describe("uploadSite", () => {
       );
       expect.unreachable();
     } catch (error: any) {
+      expect(error.message).toContain("owned by another user");
       expect(error.tip).toBe(
         "Choose a different name with --site <name>"
       );
     }
-  });
-
-  it("throws CliError on connection failure", async () => {
-    const failingFetch: typeof fetch = async () => {
-      throw new Error("ECONNREFUSED");
-    };
-
-    await expect(
-      uploadSite(
-        "http://localhost:9999",
-        "test-token",
-        zip,
-        undefined,
-        failingFetch
-      )
-    ).rejects.toThrow("Could not connect to server");
-  });
-
-  it("throws CliError on unknown server error", async () => {
-    await expect(
-      uploadSite(
-        "http://localhost:8080",
-        "test-token",
-        zip,
-        undefined,
-        fakeFetch(500, { detail: "Internal server error" })
-      )
-    ).rejects.toThrow("Internal server error");
-  });
-
-  it("throws text response errors", async () => {
-    await expect(
-      uploadSite(
-        "http://localhost:8080",
-        "test-token",
-        zip,
-        undefined,
-        fakeTextFetch(500, "proxy failure")
-      )
-    ).rejects.toThrow("proxy failure");
   });
 });

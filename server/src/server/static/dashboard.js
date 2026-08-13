@@ -45,7 +45,7 @@ async function loadSites() {
             html += '<tr>';
             html += '<td><a href="/dashboard/sites/' + encodeURIComponent(site.name) + '" class="link">' + name + '</a></td>';
             html += '<td>' + window.visibilityBadge(Boolean(site.private)) + '</td>';
-            html += '<td class="text-rule">' + timeAgo(site.created) + '</td>';
+            html += '<td class="text-rule">' + timeAgo(site.last_deployed_at) + '</td>';
             html += '<td class="tabular-nums text-rule">' + (site.total_views || 0).toLocaleString() + '</td>';
             html += '<td class="text-right"><a href="' + esc(url) + '" target="_blank" class="btn-sm-outline">View live</a></td>';
             html += '</tr>';

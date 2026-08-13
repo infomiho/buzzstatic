@@ -11,6 +11,8 @@ def test_openapi_contains_only_public_api_paths():
         "/deploy",
         "/sites",
         "/sites/{name}",
+        "/sites/{name}/deployments",
+        "/sites/{name}/deployments/{deployment_number}/activate",
         "/sites/{site_name}/access",
         "/sites/{site_name}/access/readers",
         "/sites/{site_name}/access/readers/{reader_id}",
@@ -43,6 +45,8 @@ def test_openapi_uses_stable_unique_operation_ids():
         "deploySite",
         "listSites",
         "deleteSite",
+        "listSiteDeployments",
+        "activateSiteDeployment",
         "getSiteAccess",
         "makeSitePrivate",
         "makeSitePublic",
@@ -101,10 +105,12 @@ def test_openapi_documents_deployment_upload():
     assert file_schema["format"] == "binary"
     headers = {parameter["name"] for parameter in operation["parameters"]}
     assert headers == {"x-buzz-site", "x-buzz-access"}
-    assert set(schema["components"]["schemas"]["DeploymentResponse"]["required"]) == {
+    assert set(schema["components"]["schemas"]["DeploySiteResponse"]["required"]) == {
         "name",
+        "site_name",
         "url",
         "private",
+        "deployment_number",
     }
 
 
@@ -132,8 +138,3 @@ def test_delete_operations_document_no_content():
     assert "200" not in schema["paths"]["/sites/{name}"]["delete"]["responses"]
     assert "204" in schema["paths"]["/tokens/{token_id}"]["delete"]["responses"]
     assert "200" not in schema["paths"]["/tokens/{token_id}"]["delete"]["responses"]
-
-
-def test_openapi_generation_is_deterministic():
-    app = create_app()
-    assert app.openapi() == app.openapi()

@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -48,15 +49,28 @@ class LogoutResponse(BaseModel):
     success: Literal[True]
 
 
-class DeploymentResponse(BaseModel):
+class DeploySiteResponse(BaseModel):
     name: str
+    site_name: str
     url: str
     private: bool
+    deployment_number: int
+
+
+class SiteDeploymentResponse(BaseModel):
+    deployment_number: int
+    deployed_at: datetime
+    size_bytes: int
+    source: Literal["dashboard", "api"]
+    actor: str
+    credential: str | None
+    active: bool
 
 
 class SiteResponse(BaseModel):
     name: str
-    created: str
+    created: datetime
+    last_deployed_at: datetime
     size_bytes: int | None
     total_views: int
     private: bool
@@ -186,7 +200,7 @@ class CloudflareCapability(BaseModel):
 
 class CreateTokenRequest(BaseModel):
     site_name: str
-    name: str = "Deployment token"
+    name: str = Field(default="Deployment token", min_length=1, max_length=100)
 
 
 class DeploymentTokenResponse(BaseModel):

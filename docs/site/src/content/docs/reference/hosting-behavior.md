@@ -5,6 +5,8 @@ description: How Buzz maps site requests to deployed files and fallback pages.
 
 Buzz serves each deployed site from its site hostname. This reference describes file lookup, fallback status codes, methods, and content types.
 
+Each site deployment is an immutable, numbered set of files. Exactly one retained deployment is live. Buzz keeps the 10 most recent deployments and automatically removes older deployment history and files.
+
 ## Site Hostnames
 
 With `BUZZ_DOMAIN=buzz.example.com`, the control host is `buzz.example.com` and a site named `my-site` is served from `my-site.buzz.example.com`.

@@ -18,6 +18,7 @@ LOCAL_CONTROL_ORIGIN = "http://localhost:8080"
 class Settings:
     data_dir: Path
     sites_dir: Path
+    deployments_dir: Path
     db_path: Path
     domain: str | None
     dev_mode: bool
@@ -71,6 +72,7 @@ class Settings:
         return cls(
             data_dir=data_dir,
             sites_dir=data_dir / "sites",
+            deployments_dir=data_dir / "deployments",
             db_path=data_dir / "data.db",
             domain=environment_value("BUZZ_DOMAIN"),
             dev_mode=False,

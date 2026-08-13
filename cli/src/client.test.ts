@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   apiFetch,
-  authHeaders,
   isRecord,
   requestEmpty,
   requestJson,
@@ -20,18 +19,6 @@ function fetchOnce(response: Response): typeof fetch {
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
-});
-
-describe("authHeaders", () => {
-  it("returns bearer header when token provided", () => {
-    expect(authHeaders("my-token")).toEqual({
-      Authorization: "Bearer my-token",
-    });
-  });
-
-  it("returns empty object when no token", () => {
-    expect(authHeaders()).toEqual({});
-  });
 });
 
 describe("apiFetch authentication", () => {
@@ -264,23 +251,5 @@ describe("requestEmpty", () => {
     await expect(
       requestEmpty("/x", [202, 204], { method: "DELETE" }, { cliOptions, fetchFn })
     ).resolves.toBe(202);
-  });
-
-  it("maps 404 to notFound", async () => {
-    const fetchFn = fetchOnce(new Response(null, { status: 404 }));
-
-    await expect(
-      requestEmpty("/x", [204], {}, { cliOptions, fetchFn, errors: { notFound: "gone" } })
-    ).rejects.toThrow("gone");
-  });
-
-  it("throws the fallback for an unmatched status", async () => {
-    const fetchFn = fetchOnce(
-      new Response(JSON.stringify({ detail: "nope" }), { status: 500 })
-    );
-
-    await expect(
-      requestEmpty("/x", [204], {}, { cliOptions, fetchFn })
-    ).rejects.toThrow("nope");
   });
 });

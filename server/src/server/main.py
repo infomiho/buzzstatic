@@ -10,7 +10,6 @@ from .app import create_app
 from .db import Database
 from .environment import environment_value
 from .settings import Settings
-from .site_store import SiteStore
 
 
 def access_control_warning(
@@ -46,7 +45,6 @@ def main() -> None:
     database = Database(settings.db_path)
     database.init()
     with database.connect() as conn:
-        SiteStore(conn, settings.sites_dir).reconcile()
         user_count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
     if not settings.dev_mode:
         warning = access_control_warning(

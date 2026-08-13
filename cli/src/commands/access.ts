@@ -1,5 +1,3 @@
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { Command } from "commander";
 import {
   CliError,
@@ -10,6 +8,7 @@ import {
   type CliOptions,
 } from "../client.js";
 import { confirm } from "../prompts.js";
+import { resolveCurrentSite } from "../site.js";
 
 interface AccessState {
   private: boolean;
@@ -45,21 +44,6 @@ function accessPath(site: string): string {
   return `/sites/${encodeURIComponent(site)}/access`;
 }
 
-function resolveSite(site?: string): string {
-  if (site?.trim()) return site.trim();
-
-  const cnamePath = join(process.cwd(), "CNAME");
-  if (!existsSync(cnamePath)) {
-    throw new CliError(
-      "No CNAME file found",
-      "Deploy first with 'buzz deploy .' or pass --site <site>"
-    );
-  }
-  const cname = readFileSync(cnamePath, "utf8").trim();
-  if (!cname) throw new CliError("CNAME file is empty", "Pass --site <site>");
-  return cname;
-}
-
 function printAccess(site: string, state: AccessState): void {
   console.log(`${site}: ${state.private ? "private" : "public"}`);
 }
@@ -86,7 +70,7 @@ export async function accessStatus(
   options: SiteOption,
   cliOptions: CliOptions = {}
 ): Promise<void> {
-  const site = resolveSite(options.site);
+  const site = resolveCurrentSite(options.site);
   await reportVisibility(site, cliOptions, {}, "Could not get site access");
 }
 
@@ -94,7 +78,7 @@ export async function makePrivate(
   options: SiteOption,
   cliOptions: CliOptions = {}
 ): Promise<void> {
-  const site = resolveSite(options.site);
+  const site = resolveCurrentSite(options.site);
   await reportVisibility(
     site,
     cliOptions,
@@ -108,7 +92,7 @@ export async function makePublic(
   cliOptions: CliOptions = {},
   dependencies: PublicDependencies = { confirm }
 ): Promise<void> {
-  const site = resolveSite(options.site);
+  const site = resolveCurrentSite(options.site);
   if (!options.yes && !(await dependencies.confirm(`Make '${site}' public?`))) {
     console.log("Aborted.");
     return;

@@ -30,6 +30,7 @@ def make_settings(tmp_path):
     def _make(**overrides):
         values = {
             "sites_dir": tmp_path,
+            "deployments_dir": tmp_path / ".deployments",
             "db_path": tmp_path / "data.db",
             "domain": None,
             "analytics_secret": "test-secret",
@@ -43,7 +44,13 @@ def make_settings(tmp_path):
 @pytest.fixture
 def make_app(database, make_settings):
     def _make(**overrides):
-        return create_app(settings=make_settings(**overrides), database=database)
+        settings = make_settings(**overrides)
+        app = create_app(settings=settings, database=database)
+        with database.connect() as conn:
+            app.state.content_roots.load(
+                conn, settings.sites_dir, settings.deployments_dir
+            )
+        return app
 
     return _make
 

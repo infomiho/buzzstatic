@@ -45,10 +45,14 @@ def resolve_normalized_site_file(
     sites_dir: Path, subdomain: str, url_path: str
 ) -> Path | None:
     subdomain = validated_subdomain(subdomain)
-
     site_root = (sites_dir / subdomain).resolve()
     if not site_root.is_relative_to(sites_dir.resolve()):
         return None
+    return resolve_normalized_content_file(site_root, url_path)
+
+
+def resolve_normalized_content_file(site_root: Path, url_path: str) -> Path | None:
+    site_root = site_root.resolve()
     if not site_root.is_dir():
         return None
 

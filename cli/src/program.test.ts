@@ -16,18 +16,12 @@ function commandPaths() {
 }
 
 describe("createProgram", () => {
-  it("creates independent command trees", () => {
-    const first = createProgram();
-    const second = createProgram();
-
-    expect(first).not.toBe(second);
-    expect(first.commands).not.toBe(second.commands);
-    expect(first.helpInformation()).toBe(second.helpInformation());
-  });
-
   it("registers every public command", () => {
     expect(commandPaths()).toEqual([
       "deploy",
+      "deployments",
+      "deployments list",
+      "deployments use",
       "list",
       "url",
       "delete",

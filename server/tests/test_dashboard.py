@@ -200,12 +200,49 @@ def test_site_detail_module_owns_site_data_and_redeploy_handler(
 
     assert re.search(r'<script type="module" src="/static/site-detail\.js\?v=[^" ]+"', response.text)
     assert re.search(
-        r'id="site-detail-root"[^>]+data-site-name="my-site"[^>]+data-created-at="[^"]+"',
+        r'id="site-detail-root"[^>]+data-site-name="my-site"[^>]+data-last-deployed-at="[^"]+"',
         response.text,
     )
     assert 'id="redeploy-site"' in response.text
     assert "onclick=\"openDeployDialog" not in response.text
     assert "const SITE_NAME" not in response.text
+
+
+def test_site_detail_renders_compact_deployment_history(
+    client, database, user_and_token, tmp_path
+):
+    user_id, token = user_and_token
+    deployment_dir = tmp_path / ".deployments" / "my-site" / "1"
+    deployment_dir.mkdir(parents=True)
+    (deployment_dir / "index.html").write_text("hello")
+    with database.connect() as conn:
+        conn.execute(
+            "INSERT INTO sites (name, owner_id, size_bytes) VALUES ('my-site', ?, 5)",
+            (user_id,),
+        )
+        conn.execute(
+            "INSERT INTO site_deployments "
+            "(site_name, deployment_number, deployed_at, size_bytes, source, actor, credential) "
+            "VALUES ('my-site', 1, '2026-08-13T14:50:54+00:00', 5, 'api', 'alice', NULL)"
+        )
+        conn.execute(
+            "INSERT INTO active_site_deployments (site_name, deployment_number) "
+            "VALUES ('my-site', 1)"
+        )
+    client.app.state.content_roots.replace("my-site", deployment_dir)
+    client.cookies.set(COOKIE_NAME, token)
+
+    response = client.get("/dashboard/sites/my-site")
+
+    assert response.status_code == 200
+    assert "Switch the active deployment" not in response.text
+    assert "<th>Files</th>" not in response.text
+    assert "Deployment 1" in response.text
+    assert 'class="badge-live">Live</span>' in response.text
+    assert "alice" in response.text
+    assert 'class="size-4 shrink-0" src="https://github.com/alice.png?size=32"' in response.text
+    assert "<strong>alice</strong> deployed via API" in response.text
+    assert 'id="make-live-deployment-dialog"' in response.text
 
 
 class TestCustomDomains:

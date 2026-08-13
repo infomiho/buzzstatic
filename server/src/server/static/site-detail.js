@@ -9,6 +9,56 @@ let analyticsChart;
 
 window.onDeploySuccess = () => setTimeout(() => location.reload(), 800);
 
+function initDeployments() {
+    const dialog = document.getElementById('make-live-deployment-dialog');
+    const confirmButton = document.getElementById('confirm-make-live-deployment');
+    const dialogError = document.getElementById('make-live-deployment-error');
+    let trigger;
+
+    const closeDialog = () => window.BuzzDialogs.close(dialog);
+    document.getElementById('cancel-make-live-deployment').addEventListener('click', closeDialog);
+    window.BuzzDialogs.onCancel(dialog, closeDialog);
+
+    document.querySelectorAll('.make-live-deployment').forEach(button => {
+        button.addEventListener('click', () => {
+            trigger = button;
+            document.getElementById('make-live-deployment-number').textContent = button.dataset.deploymentNumber;
+            dialogError.classList.add('hidden');
+            window.BuzzDialogs.open(dialog, button);
+        });
+    });
+
+    confirmButton.addEventListener('click', () => runAction(confirmButton, 'Making live...', async () => {
+        if (!trigger) return;
+        dialogError.classList.add('hidden');
+        const number = trigger.dataset.deploymentNumber;
+        try {
+            await request(
+                '/sites/' + encodeURIComponent(SITE_NAME) + '/deployments/' + number + '/activate',
+                { method: 'POST' },
+                'Buzz could not make this deployment live.',
+            );
+            location.reload();
+        } catch (requestError) {
+            dialogError.textContent = requestError.message;
+            dialogError.classList.remove('hidden');
+        }
+    }));
+
+    document.querySelectorAll('[data-deployment-time]').forEach(element => {
+        const date = new Date(element.dataset.deploymentTime);
+        if (Number.isNaN(date.getTime())) return;
+        element.textContent = date.toLocaleString(undefined, {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+        });
+        element.dateTime = date.toISOString();
+    });
+}
+
 function esc(str) {
     const element = document.createElement('div');
     element.textContent = str;
@@ -452,11 +502,12 @@ function initDeleteSite() {
 }
 
 document.getElementById('redeploy-site').addEventListener('click', () => openDeployDialog(SITE_NAME));
-document.getElementById('site-deployed-at').textContent = timeAgo(root.dataset.createdAt);
+document.getElementById('site-deployed-at').textContent = timeAgo(root.dataset.lastDeployedAt);
 document.querySelectorAll('[data-relative-time]').forEach(element => {
     element.textContent = timeAgo(element.dataset.relativeTime);
 });
 initBuzzAccess();
+initDeployments();
 initCustomDomains();
 loadAnalytics();
 initDisclosure('analytics-details', 'buzz:' + SITE_NAME + ':breakdown');
