@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/infomiho/buzzstatic/compare/buzz-cli-v0.14.2...buzz-cli-v0.15.0) (2026-08-13)
+
+
+### Features
+
+* add immutable site deployments ([2c67095](https://github.com/infomiho/buzzstatic/commit/2c670953058d0971587c90d1ca3c02933a7bbfba))
+
 ## [0.14.2](https://github.com/infomiho/buzzstatic/compare/buzz-cli-v0.14.1...buzz-cli-v0.14.2) (2026-08-03)
 
 

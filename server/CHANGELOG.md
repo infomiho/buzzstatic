@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/infomiho/buzzstatic/compare/server-v0.5.0...server-v0.6.0) (2026-08-13)
+
+
+### Features
+
+* add immutable site deployments ([2c67095](https://github.com/infomiho/buzzstatic/commit/2c670953058d0971587c90d1ca3c02933a7bbfba))
+
 ## [0.5.0](https://github.com/infomiho/buzzstatic/compare/server-v0.4.1...server-v0.5.0) (2026-08-12)
 
 
