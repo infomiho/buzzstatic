@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/infomiho/buzzstatic/compare/server-v0.6.0...server-v0.6.1) (2026-09-06)
+
+
+### Bug Fixes
+
+* harden deployment uploads and hosted request handling ([eb69d88](https://github.com/infomiho/buzzstatic/commit/eb69d88d09d6c6e84e312ccfc6d18262f126eeda))
+
 ## [0.6.0](https://github.com/infomiho/buzzstatic/compare/server-v0.5.0...server-v0.6.0) (2026-08-13)
 
 
