@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.1](https://github.com/infomiho/buzzstatic/compare/buzz-cli-v0.15.0...buzz-cli-v0.15.1) (2026-09-06)
+
+
+### Bug Fixes
+
+* harden deployment uploads and hosted request handling ([eb69d88](https://github.com/infomiho/buzzstatic/commit/eb69d88d09d6c6e84e312ccfc6d18262f126eeda))
+
 ## [0.15.0](https://github.com/infomiho/buzzstatic/compare/buzz-cli-v0.14.2...buzz-cli-v0.15.0) (2026-08-13)
 
 
