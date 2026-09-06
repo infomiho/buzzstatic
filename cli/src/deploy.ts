@@ -1,3 +1,4 @@
+import { Blob } from "node:buffer";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { CliError, isRecord, requestJson } from "./client.js";
@@ -25,7 +26,9 @@ function isDeploySiteResponse(value: unknown): value is DeploySiteResponse {
     typeof value.url === "string" &&
     typeof value.private === "boolean" &&
     (value.deployment_number === undefined ||
-      (Number.isInteger(value.deployment_number) && value.deployment_number > 0))
+      (typeof value.deployment_number === "number" &&
+        Number.isInteger(value.deployment_number) &&
+        value.deployment_number > 0))
   );
 }
 

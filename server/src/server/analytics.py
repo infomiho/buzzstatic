@@ -391,7 +391,10 @@ def _referrer_host(request: Any, internal_hosts: Collection[str]) -> str | None:
     referrer = request.headers.get("referer") or request.headers.get("referrer")
     if not referrer:
         return None
-    host = _normalized_host(urlparse(referrer).hostname or "")
+    try:
+        host = _normalized_host(urlparse(referrer).hostname or "")
+    except ValueError:
+        return None
     current_host = _normalized_host((request.headers.get("host") or "").split(":", 1)[0])
     site_hosts = {_normalized_host(value) for value in internal_hosts}
     if host == current_host or host in site_hosts or not host:

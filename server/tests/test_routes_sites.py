@@ -19,6 +19,67 @@ def _archive(files: dict[str, str]) -> bytes:
     return output.getvalue()
 
 
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [
+        ("/", "home"),
+        ("/docs", "flat page"),
+        ("/docs/", "directory page"),
+        ("/docs/?version=2", "directory page"),
+        ("/release.html/", "release directory"),
+    ],
+)
+def test_directory_urls_serve_their_index(make_app, path, expected):
+    client = TestClient(make_app(dev_mode=True))
+    archive = _archive({
+        "index.html": "home",
+        "docs.html": "flat page",
+        "docs/index.html": "directory page",
+        "release.html/index.html": "release directory",
+    })
+    deployed = client.post(
+        "/deploy",
+        headers={"x-buzz-site": "my-site"},
+        files={"file": ("site.zip", archive, "application/zip")},
+    )
+    assert deployed.status_code == 200
+
+    response = client.get(
+        path, headers={"host": "my-site.localhost:8080"}, follow_redirects=False
+    )
+
+    assert response.status_code == 200
+    assert response.text == expected
+
+
+@pytest.mark.parametrize(
+    ("fallback", "status", "expected"),
+    [
+        ({"200.html": "spa"}, 200, "spa"),
+        ({"404.html": "custom not found"}, 404, "custom not found"),
+        ({}, 404, "404 Not Found"),
+    ],
+)
+def test_directory_without_index_uses_site_fallback(make_app, fallback, status, expected):
+    client = TestClient(make_app(dev_mode=True))
+    archive = _archive({
+        "docs.html": "flat page",
+        "docs/.html": "hidden file",
+        **fallback,
+    })
+    deployed = client.post(
+        "/deploy",
+        headers={"x-buzz-site": "my-site"},
+        files={"file": ("site.zip", archive, "application/zip")},
+    )
+    assert deployed.status_code == 200
+
+    response = client.get("/docs/", headers={"host": "my-site.localhost:8080"})
+
+    assert response.status_code == status
+    assert response.text == expected
+
+
 class TestValidateSiteName:
     def test_translates_invalid_subdomain_to_bad_request(self):
         with pytest.raises(BadRequest):

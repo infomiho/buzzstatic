@@ -90,6 +90,27 @@ function fakeFetch(status: number, body: object): typeof fetch {
 describe("uploadSite", () => {
   const zip = Buffer.from("fake-zip-content");
 
+  it("uploads only the archive bytes from a sliced buffer", async () => {
+    const archive = Buffer.from([99, 80, 75, 0, 255, 88]).subarray(1, 5);
+    const fetchFn: typeof fetch = async (input, init) => {
+      const form = await new Request(input, init).formData();
+      const file = form.get("file");
+      expect(file).toBeInstanceOf(File);
+      if (!(file instanceof File)) throw new Error("Missing uploaded file");
+      expect(file.name).toBe("site.zip");
+      expect(file.type).toBe("application/zip");
+      expect([...new Uint8Array(await file.arrayBuffer())]).toEqual([80, 75, 0, 255]);
+      return new Response(JSON.stringify({
+        site_name: "my-site",
+        url: "https://my-site.example.com",
+        private: false,
+        deployment_number: 1,
+      }));
+    };
+
+    await uploadSite("https://buzz.example.com", "token", archive, "my-site", fetchFn);
+  });
+
   it("returns the explicit site name on success", async () => {
     const result = await uploadSite(
       "http://localhost:8080",
@@ -126,6 +147,24 @@ describe("uploadSite", () => {
     expect(result.siteName).toBe("my-site");
     expect(result.deploymentNumber).toBeUndefined();
   });
+
+  it.each([null, "1", true, {}, [], 0, -1, 1.5])(
+    "rejects an invalid deployment number in an upload response: %j",
+    async (deploymentNumber) => {
+      await expect(uploadSite(
+        "https://buzz.example.com",
+        "token",
+        zip,
+        "my-site",
+        fakeFetch(200, {
+          site_name: "my-site",
+          url: "https://my-site.example.com",
+          private: false,
+          deployment_number: deploymentNumber,
+        }),
+      )).rejects.toThrow("Server returned an invalid deployment response");
+    },
+  );
 
   it("asks for a private site with the deployment", async () => {
     const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(

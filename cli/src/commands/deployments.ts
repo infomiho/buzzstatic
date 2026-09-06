@@ -19,6 +19,7 @@ interface SiteDeployment {
 function isSiteDeployment(value: unknown): value is SiteDeployment {
   return (
     isRecord(value) &&
+    typeof value.deployment_number === "number" &&
     Number.isInteger(value.deployment_number) &&
     value.deployment_number > 0 &&
     typeof value.deployed_at === "string" &&

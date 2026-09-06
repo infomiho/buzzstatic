@@ -74,6 +74,7 @@ Run the CLI tests and production build:
 ```bash
 cd cli
 npm test
+npm run typecheck
 npm run build
 ```
 

@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { afterEach, describe, it, expect } from "vitest";
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import JSZip from "jszip";
 import { formatSize, createZipBuffer } from "./lib.js";
@@ -15,8 +15,18 @@ describe("formatSize", () => {
   });
 });
 
+const temporaryDirectories: string[] = [];
+
+afterEach(() => {
+  for (const directory of temporaryDirectories.splice(0)) {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 function makeTmpDir(): string {
-  return mkdtempSync(join(tmpdir(), "buzz-zip-test-"));
+  const directory = mkdtempSync(join(tmpdir(), "buzz-zip-test-"));
+  temporaryDirectories.push(directory);
+  return directory;
 }
 
 async function zipEntries(buf: Buffer): Promise<string[]> {
@@ -25,6 +35,38 @@ async function zipEntries(buf: Buffer): Promise<string[]> {
 }
 
 describe("createZipBuffer", () => {
+  it("excludes private project files at every depth while preserving site assets", async () => {
+    const dir = makeTmpDir();
+    const files = [
+      ".git",
+      "nested/.git/config",
+      "nested/worktree/.git",
+      "nested/node_modules/pkg/index.js",
+      "nested/.vscode/settings.json",
+      "nested/deeper/.idea/workspace.xml",
+      "nested/.env",
+      "nested/deeper/.env.production",
+      "nested/.DS_Store",
+      "index.html",
+      ".well-known/acme-challenge/token",
+      "nested/.well-known/assetlinks.json",
+      "assets/node_modules-guide.html",
+      "nested/dist/app.js",
+    ];
+    for (const file of files) {
+      mkdirSync(dirname(join(dir, file)), { recursive: true });
+      writeFileSync(join(dir, file), "fixture");
+    }
+
+    expect(await zipEntries(await createZipBuffer(dir))).toEqual([
+      ".well-known/acme-challenge/token",
+      "assets/node_modules-guide.html",
+      "index.html",
+      "nested/.well-known/assetlinks.json",
+      "nested/dist/app.js",
+    ]);
+  });
+
   it("includes site files and excludes local or sensitive files", async () => {
     const dir = makeTmpDir();
     writeFileSync(join(dir, "index.html"), "<h1>hi</h1>");

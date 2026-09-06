@@ -557,13 +557,14 @@ def test_access_grant_is_independent_of_control_allowlist(make_app, database, tm
     assert response.status_code == 200
 
 
-def test_private_site_requires_owner_handoff(make_app, database, tmp_path):
+@pytest.mark.parametrize("return_path", ["/admin?tab=users", "/admin/?tab=users"])
+def test_private_site_requires_owner_handoff(make_app, database, tmp_path, return_path):
     token = _session_token(database)
     _create_site(database, tmp_path, token)
     client = TestClient(make_app())
     client.put("/sites/private-site/access", headers=_auth(token))
 
-    gated = client.get("/admin", headers=SITE_HOST)
+    gated = client.get(return_path, headers=SITE_HOST)
     assert gated.status_code == 401
     assert "Private site" in gated.text
     assert "private-site.localhost" in gated.text
@@ -577,7 +578,7 @@ def test_private_site_requires_owner_handoff(make_app, database, tmp_path):
         params={
             "site": "private-site",
             "host": "private-site.localhost",
-            "path": "/admin?tab=users",
+            "path": return_path,
         },
     )
     assert authorize.status_code == 200
@@ -589,7 +590,7 @@ def test_private_site_requires_owner_handoff(make_app, database, tmp_path):
         data={
             "site": "private-site",
             "host": "private-site.localhost",
-            "path": "/admin?tab=users",
+            "path": return_path,
         },
     )
     code = re.search(r'name="code" value="([^"]+)"', handoff.text)
@@ -603,7 +604,7 @@ def test_private_site_requires_owner_handoff(make_app, database, tmp_path):
         follow_redirects=False,
     )
     assert callback.status_code == 303
-    assert callback.headers["location"] == "/admin?tab=users"
+    assert callback.headers["location"] == return_path
     cookie_match = re.search(
         r"__Host-buzz_access=([^;]+)", callback.headers["set-cookie"]
     )
@@ -611,7 +612,7 @@ def test_private_site_requires_owner_handoff(make_app, database, tmp_path):
     access_cookie = cookie_match.group(1)
 
     allowed = client.get(
-        "/admin",
+        return_path,
         headers={**SITE_HOST, "cookie": f"__Host-buzz_access={access_cookie}"},
     )
     assert allowed.status_code == 200

@@ -19,6 +19,8 @@ The dashboard shows:
 
 Country data appears only when the request includes a supported country header from the hosting proxy. Campaigns combine available `utm_source`, `utm_medium`, and `utm_campaign` values.
 
+Malformed referrers are omitted from the referrer breakdown; the page still loads and its view is counted normally.
+
 Analytics remain attached to the canonical site when it has custom-domain aliases. Navigation between the permanent Buzz hostname and any alias of the same site is treated as internal traffic rather than an external referrer.
 
 ## Understand What Buzz Counts

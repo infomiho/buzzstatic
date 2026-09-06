@@ -68,6 +68,25 @@ describe("site deployments", () => {
     expect(log).toHaveBeenCalledWith("Deployment 1 is now live for site 'my-site'.");
   });
 
+  it.each([undefined, null, "1", true, {}, [], 0, -1, 1.5])(
+    "rejects an invalid deployment number in the server list: %j",
+    async (deploymentNumber) => {
+      fetchMock.mockResolvedValueOnce(jsonResponse([{
+        deployment_number: deploymentNumber,
+        deployed_at: "2026-08-13T10:00:00",
+        size_bytes: 1024,
+        source: "api",
+        actor: "alice",
+        credential: null,
+        active: true,
+      }]));
+
+      await expect(deployments(
+        { site: "my-site" }, { server: "https://buzz.test", token: "token" },
+      )).rejects.toThrow("Server returned an invalid site-deployment response");
+    },
+  );
+
   it("routes argv and root connection options to make a deployment live", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({
       deployment_number: 3,

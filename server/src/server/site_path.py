@@ -36,8 +36,6 @@ def normalized_url_path(raw: str) -> str:
     parts = path.lstrip("/").split("/") if path != "/" else []
     if any(part in {".", ".."} for part in parts):
         raise InvalidPath("Invalid URL path")
-    if path != "/":
-        path = path.rstrip("/")
     return path
 
 
@@ -64,7 +62,10 @@ def resolve_normalized_content_file(site_root: Path, url_path: str) -> Path | No
             return candidate
         return None
 
-    result = safe_candidate(url_path if url_path != "/" else "/index.html")
+    if url_path.endswith("/"):
+        url_path += "index.html"
+
+    result = safe_candidate(url_path)
     if result:
         return result
 

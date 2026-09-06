@@ -11,7 +11,7 @@ Use this guide when you need archive selection and replacement details beyond yo
 
 Complete [Deploy Your First Site](../../getting-started/deploy-your-first-site/) and build the files you want to publish into `./dist`.
 
-The CLI includes dotfiles, but excludes these paths from the archive:
+The CLI includes dotfiles, but excludes these paths at every directory depth:
 
 - `.git`
 - `node_modules`
@@ -19,6 +19,8 @@ The CLI includes dotfiles, but excludes these paths from the archive:
 - `.idea`
 - `.DS_Store` files
 - `.env` and `.env.*` files
+
+This also excludes `.git` files used by worktrees and submodules. Other dotfiles, including `.well-known`, and generated output directories remain included.
 
 Keep `index.html` at the root of `./dist` when it should serve at the root site URL. The CLI uploads regular build output from the directory and the server validates the resulting ZIP archive before publishing it.
 

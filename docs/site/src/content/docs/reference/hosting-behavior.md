@@ -43,6 +43,8 @@ Buzz decodes the URL path, rejects paths that escape the site directory, and che
 
 The first matching file is returned. Buzz does not redirect a clean URL to the underlying HTML file.
 
+A trailing slash requests a directory's `index.html`. When both `docs.html` and `docs/index.html` exist, `/docs` serves `docs.html` and `/docs/` serves `docs/index.html`. If that directory has no index, Buzz uses the site's fallback pages rather than the neighboring `docs.html` file.
+
 Common paths resolve as follows:
 
 | Request | Candidate |

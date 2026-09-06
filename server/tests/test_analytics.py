@@ -2,6 +2,7 @@ import sqlite3
 from datetime import date
 from types import SimpleNamespace
 
+import pytest
 from fastapi.testclient import TestClient
 
 from server.analytics import AnalyticsEvent, AnalyticsStore, build_analytics_event
@@ -239,6 +240,32 @@ class CaptureAnalytics:
 
 
 class TestAnalyticsIntegration:
+    @pytest.mark.parametrize("referrer", ["http://[", "http://[not-an-ip]/page"])
+    @pytest.mark.parametrize("header", ["referer", "referrer"])
+    def test_malformed_referrers_do_not_break_hosted_pages(
+        self, make_app, database, tmp_path, header, referrer
+    ):
+        site = tmp_path / "my-site"
+        site.mkdir()
+        (site / "index.html").write_text("hello")
+        with database.connect() as conn:
+            conn.execute("INSERT INTO sites (name) VALUES ('my-site')")
+
+        app = make_app()
+        capture = CaptureAnalytics()
+        app.state.analytics = capture
+        with TestClient(app, raise_server_exceptions=False) as client:
+            response = client.get(
+                "/",
+                headers={"host": "my-site.localhost:8080", header: referrer},
+            )
+
+        assert response.status_code == 200
+        assert response.text == "hello"
+        assert len(capture.events) == 1
+        assert capture.events[0].is_pageview
+        assert capture.events[0].referrer is None
+
     def test_hosted_site_requests_record_analytics_events(self, make_app, database, tmp_path):
         site = tmp_path / "my-site"
         site.mkdir()

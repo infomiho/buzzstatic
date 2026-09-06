@@ -27,7 +27,9 @@ interface ProgressCallbacks {
   onProgress?: (processed: number, total: number) => void;
 }
 
-const IGNORED_DIRS = [".git", "node_modules", ".vscode", ".idea"];
+const IGNORED_PROJECT_PATHS = [".git", "node_modules", ".vscode", ".idea"].map(
+  (name) => `**/${name}`
+);
 const IGNORED_FILES = ["**/.DS_Store", "**/.env", "**/.env.*"];
 
 export async function createZipBuffer(
@@ -49,8 +51,8 @@ export async function createZipBuffer(
     archive.glob("**/*", {
       cwd: directory,
       dot: true,
-      skip: IGNORED_DIRS,
-      ignore: IGNORED_FILES,
+      skip: IGNORED_PROJECT_PATHS,
+      ignore: [...IGNORED_PROJECT_PATHS, ...IGNORED_FILES],
     });
     archive.finalize();
   });
