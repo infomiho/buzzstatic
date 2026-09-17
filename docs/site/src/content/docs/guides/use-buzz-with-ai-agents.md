@@ -5,7 +5,7 @@ sidebar:
   order: 8
 ---
 
-Use this guide to let a coding agent such as Cursor or Codex run the Buzz CLI for you. The Buzz repository publishes an agent skill that describes how to install the CLI, sign in, and deploy a site.
+Use this guide to let a coding agent run the Buzz CLI for you. The Buzz repository publishes an agent skill that describes how to install the CLI, sign in, and deploy a site.
 
 ## Prerequisites
 
@@ -25,10 +25,10 @@ You need:
 
 2. Select the agents to install for when prompted. The installer detects the agents present on your machine.
 
-To skip the prompt, name the agents. Add `--global` to install the skill for every project:
+To skip the prompt, add `--global` to install the skill for every project and `--yes` to accept the detected agents:
 
 ```bash
-npx skills add infomiho/buzzstatic --agent cursor --global
+npx skills add infomiho/buzzstatic --global --yes
 ```
 
 The skill is copied into the skills directory of each selected agent.
