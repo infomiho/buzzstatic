@@ -5,7 +5,7 @@ sidebar:
   order: 8
 ---
 
-Use this guide to let a coding agent such as Claude Code, Cursor, or Codex run the Buzz CLI for you. The Buzz repository publishes an agent skill that describes how to install the CLI, sign in, and deploy a site.
+Use this guide to let a coding agent such as Cursor or Codex run the Buzz CLI for you. The Buzz repository publishes an agent skill that describes how to install the CLI, sign in, and deploy a site.
 
 ## Prerequisites
 
@@ -28,10 +28,10 @@ You need:
 To skip the prompt, name the agents. Add `--global` to install the skill for every project:
 
 ```bash
-npx skills add infomiho/buzzstatic --agent claude-code --global
+npx skills add infomiho/buzzstatic --agent cursor --global
 ```
 
-The skill is copied into the agent's skills directory, such as `.claude/skills/buzz/` for Claude Code.
+The skill is copied into the skills directory of each selected agent.
 
 ## Deploy With The Agent
 
