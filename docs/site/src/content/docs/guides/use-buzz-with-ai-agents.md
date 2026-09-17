@@ -17,21 +17,13 @@ You need:
 
 ## Install The Skill
 
-1. Run the installer from the project the agent will deploy:
-
-   ```bash
-   npx skills add infomiho/buzzstatic
-   ```
-
-2. Select the agents to install for when prompted. The installer detects the agents present on your machine.
-
-To skip the prompt, add `--global` to install the skill for every project and `--yes` to accept the detected agents:
+Run the installer from the project the agent will deploy:
 
 ```bash
-npx skills add infomiho/buzzstatic --global --yes
+npx skills add infomiho/buzzstatic
 ```
 
-The skill is copied into the skills directory of each selected agent.
+The installer detects the agents on your machine and asks which ones to install for. See the [skills CLI](https://github.com/vercel-labs/skills) for other install options.
 
 ## Deploy With The Agent
 
