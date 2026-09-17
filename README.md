@@ -35,16 +35,17 @@ You need Node.js 22 or later, npm, a GitHub account, access to a running Buzz se
 4. Replace `my-site` with a unique site name and deploy your site:
 
    ```bash
-   buzz deploy ./dist --subdomain my-site
+   buzz deploy ./dist --site my-site
    ```
 
-Buzz prints the URL and stores `my-site` in the current directory's `CNAME`. Later deployments reuse it unless `--subdomain` is supplied.
+Buzz prints the URL and stores `my-site` in the current directory's `CNAME`. Later deployments reuse it unless `--site` is supplied.
 
 ## Documentation
 
 - [Buzz documentation](https://buzzstatic.dev/)
 - [Self-host Buzz](https://buzzstatic.dev/self-hosting/overview/)
 - [CLI reference](https://buzzstatic.dev/reference/cli/)
+- [Use Buzz with AI agents](https://buzzstatic.dev/guides/use-buzz-with-ai-agents/)
 - [Changelog](cli/CHANGELOG.md)
 
 ## Contributing

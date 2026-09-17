@@ -123,7 +123,7 @@ Use these terms consistently.
 | Buzz domain | The base hostname configured with `BUZZ_DOMAIN`, such as `buzz.example.com`. Do not call it a subdomain. |
 | Site | One deployed set of static files and its Buzz metadata. |
 | Site name | The unique name that becomes the first label in a site's hostname, such as `my-site`. Prefer this term when discussing identity. |
-| Subdomain | The DNS portion of a site URL. Use it when discussing URLs, DNS, or the `--subdomain` option. |
+| Subdomain | The DNS portion of a site URL. Use it when discussing URLs or DNS. The CLI option is `--site`. |
 | Site URL | The public URL for a site, such as `https://my-site.buzz.example.com`. |
 | Deployment | An upload that creates or replaces a site. |
 | Redeployment | A deployment that replaces an existing site's files. |
@@ -157,7 +157,7 @@ Build directory: ./dist
 Use valid command syntax:
 
 ```bash
-buzz deploy ./dist --subdomain my-site
+buzz deploy ./dist --site my-site
 ```
 
 Avoid combining unrelated lessons in one example. A deployment-token guide can assume the reader already knows how to deploy a site and link to that guide.
