@@ -5,25 +5,25 @@ sidebar:
   order: 8
 ---
 
-Use this guide to let a coding agent run the Buzz CLI for you. The Buzz repository publishes an agent skill that describes how to install the CLI, sign in, and deploy a site.
+Use this guide to let a coding agent run the Buzz CLI for you. Buzz publishes an agent skill that tells the agent how to install the CLI, sign in, and deploy a site.
 
 ## Prerequisites
 
 You need:
 
 - Node.js 22 or later and npm.
-- A coding agent that reads skills from a project or home directory.
+- A coding agent that supports skills.
 - A Buzz server URL, as described in [Deploy Your First Site](../../getting-started/deploy-your-first-site/).
 
 ## Install The Skill
 
-Install the skill for a project or for every project on your machine:
+Install the skill:
 
 ```bash
 npx skills add infomiho/buzzstatic
 ```
 
-The installer detects the agents on your machine and asks which ones to install for. See the [skills CLI](https://github.com/vercel-labs/skills) for other install options.
+The installer asks which of your agents to install it for. The [skills CLI](https://github.com/vercel-labs/skills) documents the other options.
 
 ## Deploy With The Agent
 
