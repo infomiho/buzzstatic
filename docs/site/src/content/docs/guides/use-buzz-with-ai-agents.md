@@ -17,7 +17,7 @@ You need:
 
 ## Install The Skill
 
-Run the installer from the project the agent will deploy:
+Install the skill for a project or for every project on your machine:
 
 ```bash
 npx skills add infomiho/buzzstatic
