@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/infomiho/buzzstatic/compare/server-v0.7.0...server-v0.7.1) (2026-10-14)
+
+
+### Bug Fixes
+
+* **server:** show certificate warnings in attention colour unless sites are broken ([#38](https://github.com/infomiho/buzzstatic/issues/38)) ([40db73f](https://github.com/infomiho/buzzstatic/commit/40db73fbf21b21e884a1d7036e100e8a1eeed075))
+
 ## [0.7.0](https://github.com/infomiho/buzzstatic/compare/server-v0.6.1...server-v0.7.0) (2026-10-14)
 
 
