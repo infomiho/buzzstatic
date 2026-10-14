@@ -27,6 +27,11 @@ class CertificateHealth:
     expires_at: datetime | None
     checked_at: datetime
 
+    @property
+    def severity(self) -> str:
+        """Only an invalid certificate breaks sites now. The rest are early warnings."""
+        return "danger" if self.reason == "certificate_invalid" else "attention"
+
     def message(self, domain: str) -> str | None:
         if self.reason == "proxy_unreachable":
             return f"Buzz cannot reach the proxy to check the certificate for *.{domain}."

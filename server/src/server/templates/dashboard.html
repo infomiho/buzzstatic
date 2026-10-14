@@ -5,7 +5,8 @@
 {% block content %}
 <div id="dashboard-root" data-domain="{{ domain }}">
 {% if certificate_warning %}
-<p class="mb-10 border-l-4 border-danger pl-3 text-danger-dark" role="status" id="certificate-warning">{{ certificate_warning }}</p>
+{% set certificate_warning_tone = 'border-danger text-danger-dark' if certificate_severity == 'danger' else 'border-attention text-attention' %}
+<p class="mb-10 border-l-4 pl-3 {{ certificate_warning_tone }}" role="status" id="certificate-warning">{{ certificate_warning }}</p>
 {% endif %}
 {% if not has_sites %}
 {% include "_first_run.html" %}

@@ -1,4 +1,5 @@
 import asyncio
+import re
 import socket
 import ssl
 import threading
@@ -201,14 +202,28 @@ def test_dev_mode_has_no_monitor(make_app):
     assert app.state.certificate_monitor is None
 
 
-@pytest.fixture
-def degraded_app(make_app):
+def app_with_certificate_problem(make_app, reason):
     app = make_app(domain="buzz.example.com", custom_domain_origin_host="traefik", dev_mode=True)
     app.state.certificate_monitor = WildcardCertificateMonitor("traefik", "buzz.example.com")
     app.state.certificate_monitor.health = CertificateHealth(
-        False, "certificate_expiring", None, NOW + timedelta(days=5), NOW
+        False, reason, "self-signed certificate", NOW + timedelta(days=5), NOW
     )
     return app
+
+
+def dashboard_html(app):
+    client = TestClient(app, base_url="https://buzz.example.com")
+    client.cookies.set(session_cookie_name(False), DEV_SESSION_ID)
+    return client.get("/").text
+
+
+def certificate_warning_classes(html):
+    return re.search(r'<p class="([^"]*)"[^>]*id="certificate-warning"', html).group(1).split()
+
+
+@pytest.fixture
+def degraded_app(make_app):
+    return app_with_certificate_problem(make_app, "certificate_expiring")
 
 
 def test_health_reports_degraded_certificate_without_failing(degraded_app):
@@ -228,3 +243,17 @@ def test_dashboard_shows_certificate_warning(degraded_app):
     assert response.status_code == 200
     assert 'id="certificate-warning"' in response.text
     assert "The certificate for *.buzz.example.com expires on" in response.text
+
+
+@pytest.mark.parametrize(
+    ("reason", "colour"),
+    [
+        ("certificate_invalid", "text-danger-dark"),
+        ("certificate_expiring", "text-attention"),
+        ("proxy_unreachable", "text-attention"),
+    ],
+)
+def test_certificate_warning_colour_matches_its_severity(make_app, reason, colour):
+    html = dashboard_html(app_with_certificate_problem(make_app, reason))
+
+    assert colour in certificate_warning_classes(html)
