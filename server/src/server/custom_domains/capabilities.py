@@ -24,22 +24,27 @@ class DomainCapabilities:
 def compute_capabilities(
     *,
     enabled: bool,
-    control_token: str | None,
+    control_configured: bool,
     ingress_ips: frozenset[str],
     control,
     diagnostician,
     range_state,
     diagnostic_runtime_ready: bool,
     coordinator,
+    withdrawing: bool = False,
 ) -> DomainCapabilities:
     runtime_ready = bool(control and control.is_ready())
-    control_ready = bool(enabled and control_token and runtime_ready)
+    control_ready = bool(enabled and control_configured and runtime_ready)
     routing_ready = bool(ingress_ips)
 
     if not enabled:
         status = "disabled"
-        detail = "Custom domains are not enabled on this Buzz server"
-    elif not control_token or control is None:
+        detail = (
+            "Custom domains are disabled and their Traefik routers are being withdrawn"
+            if withdrawing
+            else "Custom domains are not enabled on this Buzz server"
+        )
+    elif not control_configured or control is None:
         status = "unready"
         detail = "Custom domains are enabled but the control plane is not configured"
     elif not runtime_ready:

@@ -1,4 +1,5 @@
 import sqlite3
+import stat
 
 import pytest
 
@@ -364,3 +365,127 @@ def test_site_level_access_migration_widens_existing_policies(tmp_path):
             "SELECT COUNT(*) FROM sqlite_master WHERE name = 'site_access_patterns'"
         ).fetchone()[0] == 0
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+
+
+def _database_at_version(path, version):
+    with sqlite3.connect(path) as conn:
+        for migration in MIGRATIONS[:version]:
+            migration(conn)
+        conn.execute(f"PRAGMA user_version = {version}")
+        conn.execute("INSERT INTO sites (name) VALUES ('existing-site')")
+
+
+def test_fresh_database_takes_no_backup(tmp_path):
+    database = Database(tmp_path / "data.db")
+
+    database.init()
+
+    assert database.backups.existing() == []
+    assert not (tmp_path / "backups").exists()
+
+
+def test_current_database_takes_no_backup(tmp_path):
+    database = Database(tmp_path / "data.db")
+    database.init()
+
+    database.init()
+
+    assert database.backups.existing() == []
+
+
+def test_pending_migrations_back_up_the_pre_migration_database(tmp_path):
+    path = tmp_path / "data.db"
+    previous_version = len(MIGRATIONS) - 1
+    _database_at_version(path, previous_version)
+    database = Database(path)
+
+    database.init()
+
+    [backup] = database.backups.existing()
+    assert backup.path.parent == tmp_path / "backups"
+    assert backup.path.name.startswith(f"data-schema{previous_version}-")
+    assert backup.schema_version == previous_version
+    with sqlite3.connect(backup.path) as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == previous_version
+        assert conn.execute("SELECT name FROM sites").fetchall() == [("existing-site",)]
+        assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    with sqlite3.connect(path) as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == len(MIGRATIONS)
+    assert not list((tmp_path / "backups").glob("*.partial"))
+
+
+def test_backups_are_readable_only_by_the_owner(tmp_path):
+    path = tmp_path / "data.db"
+    _database_at_version(path, len(MIGRATIONS) - 1)
+    database = Database(path)
+
+    database.init()
+
+    [backup] = database.backups.existing()
+    assert stat.S_IMODE(backup.path.stat().st_mode) == 0o600
+    assert stat.S_IMODE(backup.path.parent.stat().st_mode) == 0o700
+
+
+def test_only_the_two_newest_backups_are_kept(tmp_path):
+    path = tmp_path / "data.db"
+    _database_at_version(path, len(MIGRATIONS) - 1)
+    backups_dir = tmp_path / "backups"
+    backups_dir.mkdir()
+    for name in (
+        "data-schema14-20260101T000000Z.db",
+        "data-schema15-20260201T000000Z.db",
+        "unrelated.db",
+    ):
+        (backups_dir / name).write_bytes(b"")
+    database = Database(path)
+
+    database.init()
+
+    kept = [backup.path.name for backup in database.backups.existing()]
+    assert len(kept) == 2
+    assert kept[0].startswith(f"data-schema{len(MIGRATIONS) - 1}-")
+    assert kept[1] == "data-schema15-20260201T000000Z.db"
+    assert (backups_dir / "unrelated.db").exists()
+
+
+def test_failed_backup_blocks_migration(tmp_path):
+    path = tmp_path / "data.db"
+    previous_version = len(MIGRATIONS) - 1
+    _database_at_version(path, previous_version)
+    (tmp_path / "backups").write_text("not a directory")
+
+    with pytest.raises(RuntimeError, match="Could not back up the database"):
+        Database(path).init()
+
+    with sqlite3.connect(path) as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == previous_version
+
+
+def test_newer_schema_error_names_the_backup_to_restore(tmp_path):
+    path = tmp_path / "data.db"
+    Database(path).init()
+    backups_dir = tmp_path / "backups"
+    backups_dir.mkdir()
+    supported = len(MIGRATIONS)
+    restorable = backups_dir / f"data-schema{supported}-20261001T000000Z.db"
+    restorable.write_bytes(b"")
+    (backups_dir / f"data-schema{supported + 1}-20261002T000000Z.db").write_bytes(b"")
+    with sqlite3.connect(path) as conn:
+        conn.execute(f"PRAGMA user_version = {supported + 2}")
+
+    with pytest.raises(RuntimeError) as error:
+        Database(path).init()
+
+    message = str(error.value)
+    assert f"schema version {supported + 2} is newer than supported version {supported}" in message
+    assert f"restore {restorable} over {path}" in message
+
+
+def test_newer_schema_error_without_backup_says_so(tmp_path):
+    path = tmp_path / "data.db"
+    Database(path).init()
+    with sqlite3.connect(path) as conn:
+        conn.execute(f"PRAGMA user_version = {len(MIGRATIONS) + 1}")
+
+    with pytest.raises(RuntimeError, match="No backup restorable by this version"):
+        Database(path).init()

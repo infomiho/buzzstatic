@@ -1,10 +1,8 @@
-import json
-
 import pytest
 
 from server.custom_domains.claims import DomainClaimStore
 from server.custom_domains.transitions import DomainClaimStateMachine
-from server.custom_domains.routing import DomainRouteReconciler, build_traefik_snapshot
+from server.custom_domains.routing import DomainRouteReconciler, custom_domain_routers
 
 
 @pytest.fixture
@@ -20,81 +18,70 @@ def routing_db(database):
     return database.connect
 
 
-class FakeRuntimeClient:
-    def __init__(self, router=None):
-        self.router_response = router
-        self.names = []
+class FakeControl:
+    """Traefik serves what Buzz last published unless a test says otherwise."""
 
-    def router(self, name):
-        self.names.append(name)
-        if callable(self.router_response):
-            return self.router_response(name)
-        return self.router_response
+    def __init__(self, serves=lambda published: published, fail_write=False):
+        self._serves = serves
+        self._fail_write = fail_write
+        self.published: frozenset[str] = frozenset()
+        self.writes = []
+
+    def publish(self, routers, certificates=()):
+        if self._fail_write:
+            raise OSError("read-only file system")
+        self.writes.append(routers)
+        self.published = frozenset(routers)
+
+    def refresh(self):
+        pass
+
+    def loaded_routers(self):
+        return self._serves(self.published)
 
 
-def expected_router(hostname="www.example.com"):
-    return {
-        "status": "enabled",
-        "rule": f"Host(`{hostname}`)",
-        "service": "buzz@docker",
-        "entryPoints": ["https"],
-        "tls": {"certResolver": "buzz-custom"},
-    }
-
-
-def reconciler(connect, runtime, enabled=True):
+def reconciler(connect, control, enabled=True):
     return DomainRouteReconciler(
-        runtime,
+        control,
         "https",
         "buzz@docker",
         "buzz-custom",
         routing_enabled=lambda: enabled,
-        withdrawal_snapshot_acknowledged=lambda _name, _since: True,
         connect=connect,
     )
 
 
-def test_snapshot_is_empty_without_routable_claims(routing_db):
-    assert build_traefik_snapshot(routing_db, "https", "buzz@docker", "buzz-custom") == b"{}\n"
+def claims(connect):
+    with connect() as conn:
+        return DomainClaimStore(conn).list_for_site("my-site")
 
 
-def test_snapshot_contains_deterministic_exact_router(routing_db):
+def test_routers_are_exact_and_deterministic(routing_db):
     with routing_db() as conn:
         claim = DomainClaimStore(conn).prepare_routes(True)[0]
 
-    first = build_traefik_snapshot(routing_db, "https", "buzz@docker", "buzz-custom")
-    second = build_traefik_snapshot(routing_db, "https", "buzz@docker", "buzz-custom")
-    payload = json.loads(first)
-
-    assert first == second
-    assert payload == {
-        "http": {
-            "routers": {
-                claim.route_name: {
-                    "entryPoints": ["https"],
-                    "rule": "Host(`www.example.com`)",
-                    "service": "buzz@docker",
-                    "tls": {"certResolver": "buzz-custom"},
-                }
-            }
+    assert custom_domain_routers([claim], "https", "buzz@docker", "buzz-custom") == {
+        claim.route_name: {
+            "entryPoints": ["https"],
+            "rule": "Host(`www.example.com`)",
+            "service": "buzz@docker",
+            "tls": {"certResolver": "buzz-custom"},
         }
     }
 
 
-def test_snapshot_is_deterministic_with_multiple_aliases(routing_db):
+def test_reconciler_publishes_every_routable_alias(routing_db):
     with routing_db() as conn:
         store = DomainClaimStore(conn)
         for hostname in ("two.example.com", "three.example.com"):
             claim = store.create("my-site", hostname)
             store.record_check(claim.id, "my-site", (claim.verification_value,))
-        claims = store.prepare_routes(True)
+    control = FakeControl()
 
-    first = build_traefik_snapshot(routing_db, "https", "buzz@docker", "buzz-custom")
-    second = build_traefik_snapshot(routing_db, "https", "buzz@docker", "buzz-custom")
-    routers = json.loads(first)["http"]["routers"]
+    reconciler(routing_db, control).run_once()
 
-    assert first == second
-    assert set(routers) == {claim.route_name for claim in claims}
+    routers = control.writes[-1]
+    assert set(routers) == {claim.route_name for claim in claims(routing_db)}
     assert {router["rule"] for router in routers.values()} == {
         "Host(`www.example.com`)",
         "Host(`two.example.com`)",
@@ -102,169 +89,112 @@ def test_snapshot_is_deterministic_with_multiple_aliases(routing_db):
     }
 
 
-def test_reconciler_isolates_alias_failures(routing_db):
-    with routing_db() as conn:
-        store = DomainClaimStore(conn)
-        second = store.create("my-site", "two.example.com")
-        store.record_check(second.id, "my-site", (second.verification_value,))
+def test_reconciler_acknowledges_router_in_loaded_revision(routing_db):
+    reconciler(routing_db, FakeControl()).run_once()
 
-    def router(name):
-        if name.startswith("buzz-domain-1-"):
-            raise RuntimeError("unexpected failure")
-        return expected_router("two.example.com")
-
-    reconciler(routing_db, FakeRuntimeClient(router)).run_once()
-
-    with routing_db() as conn:
-        claims = DomainClaimStore(conn).list_for_site("my-site")
-    assert {claim.hostname: claim.route_status for claim in claims} == {
-        "two.example.com": "routed",
-        "www.example.com": "publishing",
-    }
-
-
-def test_reconciler_acknowledges_matching_runtime_router(routing_db):
-    runtime = FakeRuntimeClient(expected_router())
-
-    reconciler(routing_db, runtime).run_once()
-
-    with routing_db() as conn:
-        claim = DomainClaimStore(conn).list_for_site("my-site")[0]
+    [claim] = claims(routing_db)
     assert claim.route_status == "routed"
-    assert runtime.names == [claim.route_name]
+    assert claim.route_error is None
 
 
-def test_reconciler_records_runtime_mismatch(routing_db):
-    runtime = FakeRuntimeClient({**expected_router(), "service": "wrong@docker"})
+def test_publication_waits_until_traefik_serves_the_written_revision(routing_db):
+    reconciler(routing_db, FakeControl(serves=lambda _published: None)).run_once()
 
-    reconciler(routing_db, runtime).run_once()
+    [claim] = claims(routing_db)
+    assert claim.route_status == "publishing"
+    assert claim.route_error == "routing_config_not_loaded"
 
+
+def test_publication_requires_router_in_loaded_revision(routing_db):
+    reconciler(routing_db, FakeControl(serves=lambda _published: frozenset())).run_once()
+
+    [claim] = claims(routing_db)
+    assert claim.route_status == "publishing"
+    assert claim.route_error == "router_not_observed"
+
+
+def test_failed_write_does_not_acknowledge_publication(routing_db):
+    control = FakeControl(fail_write=True)
+
+    reconciler(routing_db, control).run_once()
+
+    [claim] = claims(routing_db)
+    assert claim.route_status == "publishing"
+    assert claim.route_error == "router_not_observed"
+
+
+@pytest.mark.parametrize("serves", [lambda _published: None, lambda _published: frozenset()])
+def test_route_reconciler_does_not_duplicate_active_claim_health_checks(routing_db, serves):
     with routing_db() as conn:
         claim = DomainClaimStore(conn).list_for_site("my-site")[0]
-    assert claim.route_status == "publishing"
-    assert claim.route_error == "router_configuration_mismatch"
-
-
-def test_reconciler_rejects_router_with_runtime_errors(routing_db):
-    runtime = FakeRuntimeClient({**expected_router(), "errors": ["service unavailable"]})
-
-    reconciler(routing_db, runtime).run_once()
-
-    with routing_db() as conn:
-        claim = DomainClaimStore(conn).list_for_site("my-site")[0]
-    assert claim.route_status == "publishing"
-    assert claim.route_error == "router_configuration_mismatch"
-
-
-def test_reconciler_rejects_malformed_router_tls(routing_db):
-    runtime = FakeRuntimeClient({**expected_router(), "tls": "invalid"})
-
-    reconciler(routing_db, runtime).run_once()
-
-    with routing_db() as conn:
-        claim = DomainClaimStore(conn).list_for_site("my-site")[0]
-    assert claim.route_status == "publishing"
-    assert claim.route_error == "router_configuration_mismatch"
-
-
-@pytest.mark.parametrize(
-    ("router", "error"),
-    [
-        (None, "router_not_observed"),
-        ({**expected_router(), "service": "wrong@docker"}, "router_configuration_mismatch"),
-    ],
-)
-def test_route_reconciler_does_not_duplicate_active_claim_health_checks(
-    routing_db, router, error
-):
-    with routing_db() as conn:
-        store = DomainClaimStore(conn)
-        claim = store.list_for_site("my-site")[0]
         conn.execute(
             "UPDATE custom_domain_claims SET claim_mode = 'cloudflare' WHERE id = ?",
             (claim.id,),
         )
-    reconciler(routing_db, FakeRuntimeClient(expected_router())).run_once()
-    with routing_db() as conn:
-        store = DomainClaimStore(conn)
-        claim = store.list_for_site("my-site")[0]
-        DomainClaimStateMachine(conn).apply_activation_decision(claim, None)
-
-    reconciler(routing_db, FakeRuntimeClient(router)).run_once()
-
+    reconciler(routing_db, FakeControl()).run_once()
     with routing_db() as conn:
         claim = DomainClaimStore(conn).list_for_site("my-site")[0]
+        DomainClaimStateMachine(conn).apply_activation_decision(claim, None)
+
+    reconciler(routing_db, FakeControl(serves=serves)).run_once()
+
+    [claim] = claims(routing_db)
     assert claim.activated_at is not None
     assert claim.route_error is None
     assert claim.activation_error is None
 
 
-def test_route_reconciler_leaves_routed_health_evidence_to_collector(routing_db):
-    with routing_db() as conn:
-        store = DomainClaimStore(conn)
-        claim = store.list_for_site("my-site")[0]
-        conn.execute(
-            "UPDATE custom_domain_claims SET claim_mode = 'cloudflare' WHERE id = ?",
-            (claim.id,),
-        )
-    reconciler(routing_db, FakeRuntimeClient(expected_router())).run_once()
-    reconciler(routing_db, FakeRuntimeClient(None)).run_once()
-    reconciler(routing_db, FakeRuntimeClient(expected_router())).run_once()
-
-    with routing_db() as conn:
-        claim = DomainClaimStore(conn).list_for_site("my-site")[0]
-    assert claim.route_error is None
-    assert claim.activated_at is None
-
-
-def test_user_removal_waits_for_runtime_absence(routing_db):
-    reconciler(routing_db, FakeRuntimeClient(expected_router())).run_once()
+def test_user_removal_waits_for_loaded_revision_without_router(routing_db):
+    reconciler(routing_db, FakeControl()).run_once()
     with routing_db() as conn:
         store = DomainClaimStore(conn)
         claim = store.list_for_site("my-site")[0]
         assert store.cancel(claim.id, "my-site") is True
+    control = FakeControl()
 
-    reconciler(routing_db, FakeRuntimeClient(None)).run_once()
+    reconciler(routing_db, control).run_once()
 
-    with routing_db() as conn:
-        claim = DomainClaimStore(conn).list_for_site("my-site")[0]
+    [claim] = claims(routing_db)
+    assert control.writes == [{}]
     assert claim.status == "cancelled"
     assert claim.route_status == "removed"
     assert claim.withdrawn_at is not None
 
 
-def test_withdrawal_waits_for_provider_snapshot_acknowledgement(routing_db):
-    reconciler(routing_db, FakeRuntimeClient(expected_router())).run_once()
+def test_withdrawal_waits_until_traefik_serves_the_written_revision(routing_db):
+    reconciler(routing_db, FakeControl()).run_once()
     with routing_db() as conn:
         store = DomainClaimStore(conn)
-        claim = store.list_for_site("my-site")[0]
-        store.cancel(claim.id, "my-site")
+        store.cancel(store.list_for_site("my-site")[0].id, "my-site")
 
-    runtime = FakeRuntimeClient(None)
-    DomainRouteReconciler(
-        runtime,
-        "https",
-        "buzz@docker",
-        "buzz-custom",
-        routing_enabled=lambda: True,
-        withdrawal_snapshot_acknowledged=lambda _name, _since: False,
-        connect=routing_db,
-    ).run_once()
+    reconciler(routing_db, FakeControl(serves=lambda _published: None)).run_once()
 
-    with routing_db() as conn:
-        claim = DomainClaimStore(conn).list_for_site("my-site")[0]
+    [claim] = claims(routing_db)
     assert claim.status == "verified"
     assert claim.route_status == "removing"
-    assert runtime.names == []
+    assert claim.route_error == "routing_config_not_loaded"
+
+
+def test_withdrawal_rejects_loaded_revision_that_still_has_router(routing_db):
+    reconciler(routing_db, FakeControl()).run_once()
+    [routed] = claims(routing_db)
+    with routing_db() as conn:
+        DomainClaimStore(conn).cancel(routed.id, "my-site")
+
+    stale = FakeControl(serves=lambda _published: frozenset({routed.route_name}))
+    reconciler(routing_db, stale).run_once()
+
+    [claim] = claims(routing_db)
+    assert claim.route_status == "removing"
+    assert claim.route_error == "router_still_present"
 
 
 def test_operator_disable_withdraws_without_cancelling_ownership(routing_db):
-    reconciler(routing_db, FakeRuntimeClient(expected_router())).run_once()
+    reconciler(routing_db, FakeControl()).run_once()
 
-    reconciler(routing_db, FakeRuntimeClient(None), enabled=False).run_once()
+    reconciler(routing_db, FakeControl(), enabled=False).run_once()
 
-    with routing_db() as conn:
-        claim = DomainClaimStore(conn).list_for_site("my-site")[0]
+    [claim] = claims(routing_db)
     assert claim.status == "verified"
     assert claim.route_status == "not_routed"
     assert claim.withdrawn_at is not None

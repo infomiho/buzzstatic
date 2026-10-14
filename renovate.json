@@ -1,0 +1,19 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "enabledManagers": [
+    "dockerfile",
+    "docker-compose"
+  ],
+  "packageRules": [
+    {
+      "description": "Release Please bumps the published Buzz image",
+      "matchPackageNames": [
+        "ghcr.io/infomiho/buzzstatic"
+      ],
+      "enabled": false
+    }
+  ]
+}

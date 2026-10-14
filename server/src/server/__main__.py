@@ -1,3 +1,8 @@
-from server.main import main
+from server.environment import InvalidEnvironment
 
-main()
+try:
+    from server.main import main
+
+    main()
+except InvalidEnvironment as exc:
+    raise SystemExit(f"ERROR: {exc}") from None

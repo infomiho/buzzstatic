@@ -21,8 +21,11 @@ For Coolify, open the application's deployment and runtime logs, then check the 
 Common server startup causes include:
 
 - `GitHub OAuth not configured`: Set both `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET`, then restart Buzz.
-- An invalid integer for a deployment limit: Restore a valid integer value and restart Buzz.
+- `ERROR: Invalid <NAME>`: correct the named variable and restart Buzz.
+- `ERROR: BUZZ_DOMAIN ...`: set `BUZZ_DOMAIN` to a bare hostname such as `buzz.example.com`, without a scheme, port, or path.
 - `Could not reconcile ... deployment operation(s)`: Buzz found an unreadable or inconsistent journal under `/data/sites/.operations` and stopped to avoid publishing uncertain state.
+- `Database schema version ... is newer than supported version`: a newer Buzz already migrated the database. Start that newer release again, or [restore the pre-migration backup](../../self-hosting/manage-data-and-backups/#restore-a-pre-migration-backup) the message names.
+- `Could not back up the database ... before migrating`: Buzz refuses to migrate without a backup. Free disk space on the data volume and restart Buzz.
 
 For reconciliation failures, stop Buzz and create a cold copy of the complete data volume before investigating. Do not remove the journal or edit `data.db` independently. Buzz has no automated repair command for an operation it can't reconcile.
 
@@ -36,9 +39,10 @@ Test each layer:
    dig +short buzz.example.com
    ```
 
-2. Confirm the server container is running and exposed to Traefik on port `8080`.
-3. Confirm ports `80` and `443` are allowed by the host firewall and infrastructure firewall.
-4. Request the public endpoint:
+2. Confirm the server container is running, reports `healthy` in `docker ps`, and is exposed to Traefik on port `8080`. Traefik drops routes to unhealthy containers.
+3. Check the Traefik logs for `client version 1.24 is too old`. Traefik releases before v3.6.1 cannot read routes from Docker Engine 29 and later. With Docker Compose, use the Traefik release pinned in the [Compose file](../../self-hosting/docker-compose/) or a newer one. With Coolify, keep the proxy image that Coolify's current release ships.
+4. Confirm ports `80` and `443` are allowed by the host firewall and infrastructure firewall.
+5. Request the public endpoint:
 
    ```bash
    curl --verbose https://buzz.example.com/health
@@ -62,18 +66,28 @@ The DNS record for `buzz.example.com` doesn't cover site hostnames. Add a separa
 
 ## TLS Certificate Issuance Fails
 
-Inspect Traefik logs for ACME and Cloudflare errors. Then check:
+Read `wildcard_certificate_error` from `/health`, then find the matching `Wildcard certificate:` line in the Buzz server logs:
 
-- The Cloudflare token has DNS edit permission for the correct zone.
-- The token is available to Traefik as `CF_DNS_API_TOKEN`. The standalone Compose file maps `CF_API_TOKEN` to that name.
+- `not_configured`: `BUZZ_CLOUDFLARE_DNS_API_TOKEN` is missing.
+- `issuance_failed`: the order failed. The log line names the Cloudflare or ACME error.
+- `storage_failed`: Buzz could not save the certificate to `/data/tls`, usually a full disk. It keeps serving the issued certificate and saves it on the next attempt.
+- `publish_failed`: Buzz could not write `buzz-certificate.yaml`.
+
+Then check:
+
+- `BUZZ_CLOUDFLARE_DNS_API_TOKEN` has Zone:Read and DNS:Edit for the zone of `BUZZ_DOMAIN`.
 - The authoritative DNS zone is hosted by Cloudflare.
-- Coolify has one proxy-level wildcard certificate router, while Buzz's routers use `tls=true` without `tls.certresolver`.
-- The documented Coolify resolver change is used only on a proxy dedicated to Cloudflare-managed domains. Restore the saved proxy configuration if another application's TLS fails.
-- The `buzz.example.com` and `*.buzz.example.com` records are **DNS only** for the documented base-host setup.
+- Only one Buzz instance writes to this proxy's dynamic directory.
+- The server can reach `api.cloudflare.com` and the ACME directory over HTTPS, and the zone's nameservers over DNS.
+- `BUZZ_TRAEFIK_DYNAMIC_DIR` points at a directory Traefik's file provider watches, and Buzz can write to it.
+- No other file in that directory is malformed. One broken file stops Traefik from loading the whole directory.
+- No other wildcard certificate for the same names exists in Traefik's `acme.json` or another dynamic file. Traefik picks either one at random after a restart.
+- Buzz's routers use `tls=true` without `tls.certresolver`.
+- `BUZZ_ACME_DIRECTORY_URL` is unset, unless you are rehearsing against staging.
 
 ## Cloudflare Proxy Diagnostics
 
-Cloudflare claims return `421` until activation is enabled and every required check passes. Active domains show degraded health during the first two consecutive edge or origin transport failures and stop serving on the third. Ownership, non-Cloudflare DNS, and challenge identity failures stop serving immediately. A fully healthy pass recovers automatically.
+Cloudflare claims return `421` until every required check passes. Active domains show degraded health during the first two consecutive edge or origin transport failures and stop serving on the third. Ownership, non-Cloudflare DNS, and challenge identity failures stop serving immediately. A fully healthy pass recovers automatically.
 
 Standard Coolify Docker networks are IPv4-only unless IPv6 is explicitly enabled. Cloudflare can return A records and synthetic AAAA records for a proxied hostname. Buzz still validates every answer against Cloudflare ranges and includes every answer in DNS confirmation, but it does not require successful IPv6 connections when every IPv6 address reports that the container runtime cannot route IPv6 and every IPv4 address fully validates. Any partial IPv6 failure, ordinary transport error, TLS error, or challenge error remains actionable and blocks activation.
 
@@ -88,12 +102,16 @@ Standard Coolify Docker networks are IPv4-only unless IPv6 is explicitly enabled
 - `edge_cached_challenge`: bypass cache for the current generation's verification path.
 - `edge_waf_denied` or `edge_challenge_present`: bypass WAF, bot, Access, or managed challenge rules.
 - `http_forward_blocked` or `http_forward_cached_challenge`: remove port-80 forwarding interference. `http_forward_redirect` records the observed redirect but does not prove that Traefik's intercepted ACME path fails.
-- `dns_mixed_cloudflare_addresses`: every A and AAAA answer must be Cloudflare-owned in explicit Cloudflare mode.
-- `range_data_stale`, `range_data_invalid`, or `range_data_missing`: update and redeploy the bundled Cloudflare range snapshot; Buzz will not dial public addresses until policy is valid.
+- `dns_mixed_cloudflare_addresses`: every A and AAAA answer must be Cloudflare-owned for a Cloudflare hostname.
+- `range_data_stale`, `range_data_invalid`, or `range_data_missing`: upgrade Buzz to refresh the bundled Cloudflare range snapshot. Buzz doesn't dial public addresses until it is valid. Buzz warns in its logs, on the site dashboard, and in `GET /capabilities/custom-domains` during the 30 days before the snapshot goes stale. Upgrading to the latest release refreshes it.
 
-Buzz does not infer Cloudflare mode, change DNS, follow redirects, or request customer Cloudflare credentials.
+Buzz does not change DNS, follow redirects, or request customer Cloudflare credentials.
 
-Let's Encrypt issuance can also fail because of external availability or certificate rate limits. Do not repeatedly restart Traefik while the same ACME error persists.
+Let's Encrypt issuance can also fail because of external availability or certificate rate limits. Do not repeatedly restart Buzz or Traefik while the same ACME error persists.
+
+An activated custom hostname can answer `421` for up to about 90 seconds after its router or certificate changes, for example after re-enabling custom domains or resetting the proxy, while Buzz checks it again.
+
+If every custom hostname answers `421` and `/health` reports `"custom_domains_error": "routers_unmanaged"`, Buzz has custom-domain routers but `BUZZ_TRAEFIK_DYNAMIC_DIR` is unset, usually because it was removed from the Compose file or the environment. Buzz's own sites keep working. The `Custom domains are offline:` log line names the cause. Use the current Compose file, or set `BUZZ_TRAEFIK_DYNAMIC_DIR` and its bind mount again, as in [Disable Custom Domains](../../self-hosting/coolify/#disable-custom-domains).
 
 ## GitHub Sign-In Doesn't Start Or Complete
 

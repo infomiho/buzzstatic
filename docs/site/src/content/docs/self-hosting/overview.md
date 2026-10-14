@@ -21,18 +21,18 @@ You need:
 
 - A Linux server with Docker Engine and Docker Compose, or a Coolify server.
 - A domain whose DNS records you can change. These guides use `buzz.example.com` as the Buzz domain.
-- Public access to TCP port `443`. Port `80` is used by the bundled HTTP-to-HTTPS redirect.
+- Public access to TCP ports `80` and `443`. Port `80` serves the HTTP-to-HTTPS redirect and the certificate challenges for custom domains.
 - A GitHub account that can create an OAuth app.
 - A backup destination outside the Docker host.
 
-The bundled standalone deployment uses Cloudflare DNS for Let's Encrypt DNS-01 validation. If your DNS is hosted elsewhere, you must adapt the Traefik certificate resolver yourself. That configuration isn't provided or tested by this repository.
+The domain's DNS zone must be hosted on Cloudflare. Buzz obtains its wildcard certificate from Let's Encrypt through DNS-01 validation with the Cloudflare API. Other DNS providers aren't supported.
 
 ## Choose A Deployment Path
 
 - Use [Docker Compose](../docker-compose/) when you manage Docker and Traefik on the host.
-- Use [Coolify](../coolify/) when Coolify already manages the host and its Traefik proxy.
+- Use [Coolify](../coolify/) when Coolify already manages the host and its Traefik proxy. Buzz needs no changes to Coolify's proxy.
 
-Both paths build the Buzz server from the repository and mount the named volume `buzz_buzz-data` at `/data`. The volume contains deployed site files, the SQLite database, users, sessions, deployment tokens, and analytics.
+Both paths run the published Buzz server image and mount the named volume `buzz_buzz-data` at `/data`. The volume contains deployed site files, the SQLite database, users, sessions, deployment tokens, analytics, and the wildcard certificate.
 
 ## Understand The Public Endpoints
 

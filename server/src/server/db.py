@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import os
+import re
 import sqlite3
 import threading
 from collections.abc import Callable, Generator
-from contextlib import contextmanager
+from contextlib import closing, contextmanager, suppress
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .access.schema import _buzz_access, _buzz_access_readers, _buzz_access_site_level
@@ -22,6 +26,10 @@ from .custom_domains.schema import (
 )
 
 Migration = Callable[[sqlite3.Connection], None]
+
+BACKUPS_KEPT = 2
+BACKUP_TIMESTAMP_FORMAT = "%Y%m%dT%H%M%SZ"
+BACKUP_NAME = re.compile(r"data-schema(?P<schema>\d+)-(?P<taken_at>\d{8}T\d{6}Z)\.db")
 
 
 def _configure_connection(conn: sqlite3.Connection) -> None:
@@ -189,9 +197,75 @@ class ReadConnection:
                 self._conn = None
 
 
+@dataclass(frozen=True)
+class SchemaBackup:
+    path: Path
+    schema_version: int
+    taken_at: str
+
+
+class SchemaBackups:
+    """Pre-migration snapshots, so an upgrade can be rolled back by restoring
+    the database the previous server version last wrote."""
+
+    def __init__(self, directory: Path):
+        self.directory = directory
+
+    def take(self, source_path: Path, schema_version: int) -> Path:
+        """Copy the committed database through a separate connection. The
+        caller may hold the write lock, which a backup from its own connection
+        would wait on forever."""
+        taken_at = datetime.now(timezone.utc).strftime(BACKUP_TIMESTAMP_FORMAT)
+        target = self.directory / f"data-schema{schema_version}-{taken_at}.db"
+        partial = target.with_suffix(".partial")
+        try:
+            self.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+            # The backup holds the same sessions and tokens as the database.
+            os.close(os.open(partial, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600))
+            with (
+                closing(sqlite3.connect(source_path)) as source,
+                closing(sqlite3.connect(partial)) as destination,
+            ):
+                source.backup(destination)
+            os.replace(partial, target)
+        except (OSError, sqlite3.Error) as exc:
+            with suppress(OSError):
+                partial.unlink(missing_ok=True)
+            raise RuntimeError(
+                f"Could not back up the database to {self.directory} before migrating: {exc}"
+            ) from exc
+        self._prune()
+        return target
+
+    def existing(self) -> list[SchemaBackup]:
+        if not self.directory.is_dir():
+            return []
+        backups = []
+        for path in self.directory.iterdir():
+            match = BACKUP_NAME.fullmatch(path.name)
+            if match:
+                backups.append(SchemaBackup(path, int(match["schema"]), match["taken_at"]))
+        return sorted(backups, key=lambda backup: backup.taken_at, reverse=True)
+
+    def newest_restorable(self, supported_version: int) -> SchemaBackup | None:
+        return next(
+            (backup for backup in self.existing() if backup.schema_version <= supported_version),
+            None,
+        )
+
+    def _prune(self) -> None:
+        for backup in self.existing()[BACKUPS_KEPT:]:
+            backup.path.unlink(missing_ok=True)
+
+
+def _has_schema(conn: sqlite3.Connection) -> bool:
+    return conn.execute("SELECT 1 FROM sqlite_master LIMIT 1").fetchone() is not None
+
+
 class Database:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, backups_dir: Path | None = None):
         self._path = path
+        self.backups = SchemaBackups(backups_dir or path.parent / "backups")
 
     def reader(self) -> ReadConnection:
         return ReadConnection(self._path)
@@ -203,9 +277,10 @@ class Database:
             conn.execute("BEGIN IMMEDIATE")
             current_version = conn.execute("PRAGMA user_version").fetchone()[0]
             if current_version > len(MIGRATIONS):
-                raise RuntimeError(
-                    f"Database schema version {current_version} is newer than supported version {len(MIGRATIONS)}"
-                )
+                raise RuntimeError(self._newer_schema_message(current_version))
+            if current_version < len(MIGRATIONS) and _has_schema(conn):
+                backup = self.backups.take(self._path, current_version)
+                print(f"Backed up database schema version {current_version} to {backup}")
             for version, migration in enumerate(MIGRATIONS, start=1):
                 if version <= current_version:
                     continue
@@ -222,6 +297,22 @@ class Database:
             raise
         finally:
             conn.close()
+
+    def _newer_schema_message(self, current_version: int) -> str:
+        supported = len(MIGRATIONS)
+        message = (
+            f"Database schema version {current_version} is newer than supported "
+            f"version {supported}: a newer Buzz server already migrated {self._path}. "
+            "Run that newer version again"
+        )
+        backup = self.backups.newest_restorable(supported)
+        if backup is None:
+            return f"{message}. No backup restorable by this version exists in {self.backups.directory}."
+        return (
+            f"{message}, or stop Buzz and restore {backup.path} over {self._path} "
+            f"(taken {backup.taken_at}, schema version {backup.schema_version}). "
+            "Restoring discards changes made since that backup."
+        )
 
     @contextmanager
     def connect(self) -> Generator[sqlite3.Connection, None, None]:

@@ -4,9 +4,11 @@ import os
 import ipaddress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Literal
+from typing import Any, Callable
 
-Scope = Literal["server", "standalone"]
+
+class InvalidEnvironment(ValueError):
+    pass
 
 
 @dataclass(frozen=True)
@@ -16,15 +18,17 @@ class EnvironmentVariable:
     default: Any = None
     required: str | None = None
     sensitive: bool = False
-    scope: Scope = "server"
     example: str | None = None
     parser: Callable[[str], Any] = str
 
     def read(self) -> Any:
         value = os.environ.get(self.name)
-        if value is None:
+        if not value:
             return self.default
-        return self.parser(value)
+        try:
+            return self.parser(value)
+        except ValueError as exc:
+            raise InvalidEnvironment(f"Invalid {self.name}: {exc}") from exc
 
 
 def parse_bool(value: str) -> bool:
@@ -77,8 +81,8 @@ ENVIRONMENT_VARIABLES = (
     ),
     EnvironmentVariable(
         "BUZZ_DOMAIN",
-        "Base hostname for the dashboard and site subdomains.",
-        required="Required for production hosting.",
+        "Bare hostname for the dashboard and site subdomains, without a scheme, port, or path.",
+        required="Required unless the server runs with --dev.",
         example="buzz.example.com",
     ),
     EnvironmentVariable(
@@ -142,35 +146,29 @@ ENVIRONMENT_VARIABLES = (
         parser=parse_github_logins,
     ),
     EnvironmentVariable(
+        "BUZZ_TRAEFIK_DYNAMIC_DIR",
+        "Traefik file-provider directory mounted into the Buzz container. Buzz writes the wildcard certificate to `buzz-certificate.yaml` and custom-domain routers to `buzz-routes.yaml` there.",
+        example="/traefik-dynamic",
+        parser=Path,
+    ),
+    EnvironmentVariable(
+        "BUZZ_CLOUDFLARE_DNS_API_TOKEN",
+        "Cloudflare API token with Zone:Read and DNS:Edit on the zone of `BUZZ_DOMAIN`. With `BUZZ_TRAEFIK_DYNAMIC_DIR`, Buzz obtains and renews the certificate for `BUZZ_DOMAIN` and `*.BUZZ_DOMAIN` itself.",
+        sensitive=True,
+        example="your-cloudflare-api-token",
+    ),
+    EnvironmentVariable(
+        "BUZZ_ACME_DIRECTORY_URL",
+        "ACME directory Buzz uses for its wildcard certificate. Point it at the Let's Encrypt staging directory to rehearse issuance.",
+        default="https://acme-v02.api.letsencrypt.org/directory",
+        example="https://acme-v02.api.letsencrypt.org/directory",
+    ),
+    EnvironmentVariable(
         "BUZZ_CUSTOM_DOMAINS_ENABLED",
-        "Whether this Buzz server enables the optional custom-domain control plane.",
+        "Whether this Buzz server enables the optional custom-domain control plane. Requires `BUZZ_TRAEFIK_DYNAMIC_DIR`.",
         default=False,
         example="true",
         parser=parse_bool,
-    ),
-    EnvironmentVariable(
-        "BUZZ_TRAEFIK_CONTROL_TOKEN",
-        "Bearer token used by Traefik to read Buzz custom-domain configuration when custom domains are enabled.",
-        sensitive=True,
-        example="replace-with-a-random-secret",
-    ),
-    EnvironmentVariable(
-        "BUZZ_TRAEFIK_CONTROL_PORT",
-        "Private port used by the Traefik custom-domain control listener.",
-        default=8081,
-        example="8081",
-        parser=int,
-    ),
-    EnvironmentVariable(
-        "BUZZ_TRAEFIK_API_URL",
-        "Internal URL of Traefik's protected runtime API for custom-domain readiness checks.",
-        example="http://coolify-proxy:8082/api",
-    ),
-    EnvironmentVariable(
-        "BUZZ_TRAEFIK_API_AUTHORIZATION",
-        "Authorization header sent to Traefik's protected runtime API.",
-        sensitive=True,
-        example="Bearer replace-with-a-random-secret",
     ),
     EnvironmentVariable(
         "BUZZ_TRAEFIK_HTTPS_ENTRYPOINT",
@@ -186,7 +184,7 @@ ENVIRONMENT_VARIABLES = (
     ),
     EnvironmentVariable(
         "BUZZ_CUSTOM_DOMAIN_OPERATOR_TOKEN",
-        "Bearer token for the private custom-domain operator endpoint.",
+        "Bearer tokens, separated by commas, for the private custom-domain operator endpoint. The endpoint listens only when this is set.",
         sensitive=True,
         example="replace-with-a-random-secret",
     ),
@@ -220,44 +218,22 @@ ENVIRONMENT_VARIABLES = (
     ),
     EnvironmentVariable(
         "BUZZ_CUSTOM_DOMAIN_ORIGIN_HOST",
-        "Internal Traefik hostname used to validate custom-domain TLS and routing.",
+        "Internal Traefik hostname Buzz probes on port 443 to check the wildcard certificate and custom-domain routing.",
         default="coolify-proxy",
         example="coolify-proxy",
     ),
     EnvironmentVariable(
         "BUZZ_TRAEFIK_CERT_RESOLVER",
-        "Traefik certificate resolver selected by custom-domain routers.",
-        default="buzz-custom",
-        example="buzz-custom",
+        "Traefik certificate resolver selected by custom-domain routers. It must issue certificates through HTTP-01.",
+        default="letsencrypt",
+        example="letsencrypt",
     ),
     EnvironmentVariable(
         "BUZZ_CUSTOM_DOMAIN_RECONCILE_SECONDS",
-        "Interval between custom-domain router reconciliation attempts.",
+        "Seconds between custom-domain router reconciliation attempts.",
         default=5,
         example="5",
-        parser=int,
-    ),
-    EnvironmentVariable(
-        "BUZZ_CUSTOM_DOMAIN_ACME_CA_SERVER",
-        "ACME directory used by the standalone custom-domain resolver. Keep the staging default until production routing is enabled.",
-        default="https://acme-staging-v02.api.letsencrypt.org/directory",
-        scope="standalone",
-        example="https://acme-staging-v02.api.letsencrypt.org/directory",
-    ),
-    EnvironmentVariable(
-        "CF_API_TOKEN",
-        "Cloudflare API token used by Traefik for DNS-01 validation.",
-        required="Required by the standalone Docker Compose deployment.",
-        sensitive=True,
-        scope="standalone",
-        example="your-cloudflare-api-token",
-    ),
-    EnvironmentVariable(
-        "ACME_EMAIL",
-        "Email address used for Let's Encrypt certificate notifications.",
-        required="Required by the standalone Docker Compose deployment.",
-        scope="standalone",
-        example="admin@example.com",
+        parser=parse_positive_int,
     ),
 )
 

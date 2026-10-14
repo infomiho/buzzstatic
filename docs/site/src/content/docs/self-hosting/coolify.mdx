@@ -1,6 +1,6 @@
 ---
 title: Deploy With Coolify
-description: Run Buzz behind Coolify's Traefik proxy with wildcard TLS.
+description: Run Buzz behind Coolify's stock Traefik proxy with wildcard TLS.
 sidebar:
   order: 6
 ---
@@ -10,18 +10,17 @@ import composeFile from '../../../../../../server/docker-compose.coolify.yml?raw
 
 Deploy Buzz as a Docker Compose application while Coolify manages the host and Traefik proxy. A deployment repository you control holds the Compose file, which connects Buzz to the external `coolify` network and stores data in `buzz_buzz-data`.
 
+Buzz needs no proxy changes. It obtains the certificate for `buzz.example.com` and `*.buzz.example.com` itself and publishes it, together with any custom-domain routers, to `/data/coolify/proxy/dynamic`, which Coolify's default proxy already watches.
+
 ## Before You Start
 
 You need:
 
-- A working Coolify installation with its proxy enabled.
+- A working Coolify installation with its default proxy enabled.
 - A git repository you control for the deployment, readable by Coolify.
-- DNS control for `buzz.example.com`.
-- A Cloudflare API token with permission to edit DNS records for the zone.
+- The DNS zone of `buzz.example.com` hosted on Cloudflare, with the records from [Configure DNS And TLS](../configure-dns-and-tls/).
+- A Cloudflare API token with Zone:Read and DNS:Edit, scoped to that zone.
 - A configured GitHub OAuth app.
-- A backup of the current proxy configuration and a maintenance window for restarting it.
-
-The procedure below adds a separate `cloudflare` resolver next to Coolify's default `letsencrypt` resolver, which stays untouched: existing applications keep their HTTP-validation certificates. Restarting the proxy still briefly interrupts routing for every application behind it.
 
 Complete the access decision in the [Self-Hosting Overview](../overview/) before deployment. Configure upstream controls first if Buzz is for a closed group.
 
@@ -40,236 +39,150 @@ Complete the access decision in the [Self-Hosting Overview](../overview/) before
    BUZZ_DOMAIN=buzz.example.com
    GITHUB_CLIENT_ID=your-github-client-id
    GITHUB_CLIENT_SECRET=your-github-client-secret
+   BUZZ_CLOUDFLARE_DNS_API_TOKEN=your-cloudflare-api-token
    ```
 
-Do not deploy the application until the proxy is configured. This avoids exposing Buzz with an incomplete TLS setup.
-
-## Configure Coolify's Proxy
-
-Open **Servers > Proxy** and edit the Traefik Compose configuration there. Do not edit `/data/coolify/proxy/docker-compose.yml` directly because Coolify can replace direct changes during proxy actions or upgrades.
-
-Copy the complete current configuration to secure off-host storage before changing it. The copy is the rollback source for the server-wide proxy.
-
-Custom proxy configurations pin the Traefik image. After each Coolify upgrade, compare its [published Traefik version](https://cdn.coollabs.io/coolify/versions.json), update the `image:` tag here if needed, and restart the proxy.
-
-1. Add the Cloudflare token to the Traefik service:
-
-   ```yaml
-   environment:
-     - CF_DNS_API_TOKEN=your-cloudflare-api-token
-   ```
-
-2. Add a `cloudflare` resolver to the Traefik service's `command` list. Leave every existing `letsencrypt` argument untouched:
-
-   ```text
-   --certificatesresolvers.cloudflare.acme.email=admin@example.com
-   --certificatesresolvers.cloudflare.acme.dnschallenge=true
-   --certificatesresolvers.cloudflare.acme.dnschallenge.provider=cloudflare
-   --certificatesresolvers.cloudflare.acme.dnschallenge.resolvers=1.1.1.1:53,8.8.8.8:53
-   --certificatesresolvers.cloudflare.acme.storage=/traefik/acme-cloudflare.json
-   ```
-
-   The separate storage file keeps this resolver's ACME state apart from the default resolver's `acme.json`.
-
-3. Add these labels to the Traefik service:
-
-   ```text
-   traefik.http.routers.wildcard-certs.tls.certresolver=cloudflare
-   traefik.http.routers.wildcard-certs.tls.domains[0].main=buzz.example.com
-   traefik.http.routers.wildcard-certs.tls.domains[0].sans=*.buzz.example.com
-   ```
-
-4. Save the proxy configuration through **Servers > Proxy**, then restart the proxy from that page.
-
-The Buzz application labels intentionally set `tls=true` without `tls.certresolver`. Keep certificate issuance on the single proxy-level `wildcard-certs` router. Adding a resolver to the Buzz routers can create duplicate ACME challenges for the same DNS record.
-
-Traefik requires DNS-01 validation for wildcard certificates and derives certificate names from a router's TLS domains. See Traefik's [ACME certificate resolver documentation](https://doc.traefik.io/traefik/reference/install-configuration/tls/certificate-resolvers/acme/).
-
-## Prepare The Optional Custom Domain Control Plane
-
-Custom domains are disabled by default. Skip this section when the operator does not want Buzz to manage custom domains. The existing dashboard and wildcard site hosting do not require these changes.
-
-1. Generate a high-entropy control token and keep it out of source control:
-
-   ```bash
-   python -c 'import secrets; print(secrets.token_urlsafe(48))'
-   ```
-
-2. Add these variables to the Buzz application and redeploy it:
-
-   ```text
-   BUZZ_CUSTOM_DOMAINS_ENABLED=true
-   BUZZ_TRAEFIK_CONTROL_TOKEN=replace-with-the-generated-token
-   ```
-
-   The application starts a private listener on port `8081` with the network alias `buzz-traefik-control`. The port is not published or attached to a public Traefik router.
-
-3. Return to **Servers > Proxy** and add these arguments to the Traefik service's `command` list. Replace both token placeholders with the same generated token and replace the email placeholder:
-
-   ```text
-   --providers.http=true
-   --providers.http.endpoint=http://buzz-traefik-control:8081/traefik
-   --providers.http.headers.Authorization=Bearer replace-with-the-generated-token
-   --providers.http.pollInterval=5s
-   --providers.http.pollTimeout=2s
-   --providers.http.maxResponseBodySize=1048576
-   --api=true
-   --entrypoints.buzz-admin.address=:8082
-   --certificatesresolvers.buzz-custom.acme.email=admin@example.com
-   --certificatesresolvers.buzz-custom.acme.storage=/traefik/acme.json
-   --certificatesresolvers.buzz-custom.acme.httpchallenge.entrypoint=http
-   --certificatesresolvers.buzz-custom.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory
-   ```
-
-   Keep the existing Cloudflare DNS-01 `letsencrypt` resolver. The new `buzz-custom` resolver is separate and uses Coolify's `http` entrypoint for individual customer hostnames.
-
-4. Add these labels to the Traefik service, replacing the token placeholder again:
-
-   ```text
-   traefik.enable=true
-   traefik.http.routers.buzz-runtime-api.rule=PathPrefix(`/api`) && Header(`Authorization`, `Bearer replace-with-the-generated-token`)
-   traefik.http.routers.buzz-runtime-api.entrypoints=buzz-admin
-   traefik.http.routers.buzz-runtime-api.service=api@internal
-   ```
-
-   The `buzz-admin` entrypoint is not published on the host. Its authorization rule still prevents other containers on the shared Docker network from reading Traefik runtime state.
-
-5. Save and restart the proxy through **Servers > Proxy**. Do not use **Reset proxy configuration**, which replaces custom proxy settings with Coolify defaults.
-
-6. Open a terminal for the Buzz container and inspect the private readiness response:
-
-   ```bash
-   uv run python -c 'import json,os,urllib.request; token=os.environ["BUZZ_TRAEFIK_CONTROL_TOKEN"]; request=urllib.request.Request("http://localhost:8081/ready",headers={"Authorization":f"Bearer {token}"}); print(json.dumps(json.load(urllib.request.urlopen(request)),indent=2))'
-   ```
-
-The automated checks cover provider polling, protected runtime API access, entrypoint `https`, and service `buzz@docker`. They do not claim that the unused resolver or ACME storage has issued a certificate. Exercise those later with a staging hostname before production custom domains are admitted.
-
-Back up the modified proxy configuration and `/data/coolify/proxy`. A proxy restart loses the HTTP provider's in-memory snapshot until it polls Buzz again. A failed poll on a running proxy leaves the previous valid snapshot active.
-
-### Exercise Staging Routing
-
-Keep the `buzz-custom` resolver on Let's Encrypt's staging directory during this step. Staging certificates are not trusted by browsers and must not be presented as production custom-domain support.
-
-1. Add this variable to the Buzz application and redeploy it:
-
-   ```text
-   BUZZ_CUSTOM_DOMAIN_ADMISSION_ENABLED=true
-   BUZZ_CUSTOM_DOMAIN_INGRESS_IPS=your-public-ingress-ip
-   BUZZ_CUSTOM_DOMAIN_ROUTING_ENABLED=true
-   ```
-
-2. Open a site's detail page, add a custom hostname, publish the displayed DNS records, and select **Check ownership**.
-3. After ownership verifies, Buzz publishes one exact generation-qualified `Host()` router through the HTTP provider.
-4. Wait for the dashboard to report that Traefik acknowledged the router.
-5. Open the staging verification URL displayed by Buzz. The request records that the public hostname reached the expected Buzz site. No other path on that custom hostname is served during this stage.
-
-After creating the controlled test claim, set `BUZZ_CUSTOM_DOMAIN_ADMISSION_ENABLED=false` and redeploy Buzz to close admission while validation continues.
-
-To stop staging routing, set `BUZZ_CUSTOM_DOMAIN_ROUTING_ENABLED=false` and redeploy Buzz. Buzz immediately emits an empty custom-domain snapshot and stops serving challenge paths. Keep the provider configured until every claim reports that its router was withdrawn. Turning off `BUZZ_CUSTOM_DOMAINS_ENABLED` or deleting the provider first is not a withdrawal mechanism because a running Traefik instance retains its last valid snapshot after polling failures.
-
-### Enable Direct Production Domains
-
-Complete the staging publication, challenge, withdrawal, reuse, and proxy-restart checks before enabling production certificates.
-
-1. Add a separate production resolver to **Servers > Proxy** so staging certificate history remains isolated:
-
-   ```text
-   --certificatesresolvers.buzz-production.acme.email=admin@example.com
-   --certificatesresolvers.buzz-production.acme.storage=/traefik/acme-production.json
-   --certificatesresolvers.buzz-production.acme.httpchallenge.entrypoint=http
-   ```
-
-2. Save and restart the proxy, then configure Buzz and redeploy it:
-
-   ```text
-   BUZZ_TRAEFIK_CERT_RESOLVER=buzz-production
-   BUZZ_CUSTOM_DOMAIN_INGRESS_IPS=your-public-ingress-ip
-   BUZZ_CUSTOM_DOMAIN_ORIGIN_HOST=coolify-proxy
-   BUZZ_CUSTOM_DOMAIN_ROUTING_ENABLED=true
-   BUZZ_MAX_CUSTOM_DOMAINS_PER_SITE=5
-   BUZZ_MAX_CUSTOM_DOMAINS_PER_USER=20
-   BUZZ_MAX_CUSTOM_DOMAINS_SERVER_WIDE=1000
-   ```
-
-   Replace the example ingress address with every public IPv4 or IPv6 address that reaches this proxy. Every DNS answer for a direct custom hostname must be public and present in this allowlist. Keep staging and production resolvers in separate ACME storage files; an existing staging certificate in Traefik's global TLS store can suppress production issuance for the same hostname.
-
-3. Keep `BUZZ_CUSTOM_DOMAIN_ADMISSION_ENABLED=false` during controlled rollout. Set it to `true` only when site owners should be able to create new claims. The three positive quota settings limit pending and verified aliases per site, per user, and across the server. An alias awaiting acknowledged withdrawal continues to consume quota.
-
-Buzz marks each direct routed hostname active only after its DNS answers match the ingress allowlist and a trusted TLS request through `coolify-proxy:443` returns the exact generation challenge. Multiple aliases can serve one deployment, but each retains independent ownership, routing, TLS, diagnostics, and removal state. Custom-host requests and same-site alias referrers resolve through the canonical Buzz site identity.
-
-### Enable Cloudflare Proxy Domains
-
-Cloudflare proxy claims and activation are independently disabled by default. Three flags build on each other, in order:
-
-| Variable | Turns on | Set it |
-| --- | --- | --- |
-| `BUZZ_CLOUDFLARE_DIAGNOSTICS_ENABLED` | Admission of Cloudflare proxy claims | First, for a controlled claim |
-| `BUZZ_CLOUDFLARE_ACTIVATION_ENABLED` | Content serving for healthy Cloudflare claims | After the controlled-zone challenge proof |
-| `BUZZ_AUTOMATIC_DOMAIN_TRANSITION_ADMISSION_ENABLED` | Detection and validation of DNS path changes | After validating existing direct and Cloudflare claims |
-
-#### Admit Diagnostic Claims
-
-Enable diagnostic admission for a controlled claim:
-
-```text
-BUZZ_CLOUDFLARE_DIAGNOSTICS_ENABLED=true
-```
-
-Keep general custom-domain admission and routing enabled. Users must retain the TXT ownership record, enable orange-cloud proxying, and select Cloudflare **Full (strict)**. Bypass cache, redirects, WAF, Workers, Access, and managed challenges for `/.well-known/buzz-domain-check/*` and `/.well-known/acme-challenge/*`.
-
-Buzz uses no customer Cloudflare credentials. It validates resolved addresses against bundled Cloudflare ranges and pins probes to a validated address. Mixed Cloudflare and non-Cloudflare answers fail before connection. Edge TLS, edge challenge, origin, and errors 1014, 525, and 526 remain separate diagnostics. Other CDNs are unsupported.
-
-#### Activate Serving
-
-The port-80 check sends Buzz's generation challenge without following redirects. It does not validate Traefik ACME HTTP-01. Before activation, use a controlled zone to prove a fresh `/.well-known/acme-challenge/*` request in Traefik and origin logs. Then add `BUZZ_CLOUDFLARE_ACTIVATION_ENABLED=true` and redeploy.
-
-Activation requires current TXT ownership, Cloudflare-only DNS, edge TLS, the exact public generation challenge, trusted origin TLS, and the acknowledged router generation. Ownership loss, DNS leaving Cloudflare, or a challenge identity mismatch stops serving immediately. Edge and origin transport failures receive three consecutive one-minute attempts before Buzz stops serving. A healthy pass automatically activates or recovers the hostname.
-
-#### Enable Automatic Connection-Path Detection
-
-Automatic connection-path detection defaults off. It is available only when direct routing and Cloudflare diagnostics and activation are all ready, including current Cloudflare ranges and the transition runtime. After validating observations for existing direct and Cloudflare claims, add `BUZZ_AUTOMATIC_DOMAIN_TRANSITION_ADMISSION_ENABLED=true` and redeploy. Buzz then validates supported path changes without replacing the domain claim. Closing admission stops new transitions while active transitions continue to completion, cancellation, or their deadline.
-
-#### Configure Operator Endpoints
-
-Set `BUZZ_CUSTOM_DOMAIN_OPERATOR_TOKEN` to one or more dedicated bearer tokens separated by commas. On the private control port `8081`:
-
-- `GET /operator/domain-transitions` reports active transitions with current generation-qualified DNS and path evidence.
-- `POST /operator/domain-transitions/{claim_id}/cancel` validates the current effective path before retaining it and returns `404` for an unknown claim or `409` when cancellation is unsafe or loses a race.
-
-Operator routes authenticate before route or method handling and return no-store JSON errors. Do not reuse `BUZZ_TRAEFIK_CONTROL_TOKEN`, expose these endpoints through the public app, or log/send the token outside the authorization header.
-
-#### Maintain The Range Snapshot
-
-The bundled range snapshot fails closed after 180 days. Update it from Cloudflare's official `ips-v4` and `ips-v6` endpoints with `uv run python scripts/update_cloudflare_ranges.py`, review the diff, run the diagnostic tests, and deploy a new server build. Do not fetch range policy dynamically at runtime.
-
-#### Disable Cloudflare Support
-
-Setting `BUZZ_CLOUDFLARE_DIAGNOSTICS_ENABLED=false` blocks new claims but preserves existing routes. To disable activation, first close general and Cloudflare admission, remove every Cloudflare claim, and wait for acknowledged router withdrawal. Buzz refuses to start with `BUZZ_CLOUDFLARE_ACTIVATION_ENABLED=false` while an activated Cloudflare router remains.
-
-#### Recover The Proxy
-
-If the proxy fails to restart, Buzz has no valid certificate, or another application loses TLS, paste the complete saved configuration back into **Servers > Proxy**, save it, and restart the proxy. Do not keep retrying certificate issuance against the production Let's Encrypt endpoint while the same error persists.
+   `BUZZ_DOMAIN` must be a bare hostname. Buzz exits at startup when it is missing or contains a scheme, port, or path. The Compose file passes the other settings it lists from the application's environment, as described in the [configuration reference](../../reference/configuration/).
 
 ## Deploy And Verify Buzz
 
 1. Deploy the application through Coolify.
-2. Confirm that the application is running. The Compose file expects Coolify's external Docker network to be named `coolify`. If deployment reports that this network doesn't exist, confirm the server's network name before changing the Compose file.
-3. Open the application logs and check that the server didn't report missing GitHub credentials.
+2. Confirm that the application is running and healthy. The Compose file expects Coolify's external Docker network to be named `coolify`. If deployment reports that this network doesn't exist, confirm the server's network name before changing the Compose file.
+3. Open the application logs. The server must report no `ERROR:` line, and after the first issuance it logs `Wildcard certificate issued, valid until` with the expiry date.
 4. Request the health endpoint:
 
    ```bash
    curl --fail --show-error https://buzz.example.com/health
    ```
 
-5. Run the certificate inspection command in [Verify DNS, Routing, And TLS](../configure-dns-and-tls/#verify-dns-routing-and-tls) and confirm that the certificate covers `*.buzz.example.com`.
-6. Open one existing application that also uses the `letsencrypt` resolver and confirm that its certificate and route still work.
+5. Run the certificate inspection command in [Verify DNS, Routing, And TLS](../configure-dns-and-tls/#verify-dns-routing-and-tls) and confirm that the certificate covers `*.buzz.example.com`. The first issuance takes up to a few minutes. Until then the proxy serves its default certificate and `/health` reports `"status": "degraded"`. Buzz checks the served certificate again a few seconds after it publishes one.
 
-If Coolify replaces the proxy settings, return to **Servers > Proxy**, restore the saved configuration there, and restart the proxy. See [Troubleshoot Self-Hosting](../../troubleshooting/self-hosting/) for routing and certificate failures.
+See [Troubleshoot Self-Hosting](../../troubleshooting/self-hosting/) for routing and certificate failures.
+
+## How Buzz Publishes Its Certificate
+
+The Compose file bind-mounts `/data/coolify/proxy/dynamic` at `/traefik-dynamic` and sets `BUZZ_TRAEFIK_DYNAMIC_DIR` to it. Buzz keeps the certificate, its key, and the ACME account key in `/data/tls`. It writes the certificate to `buzz-certificate.yaml` in the dynamic directory and checks that file every five minutes, rewriting it when it is missing or changed without placing a new order. Buzz renews when a third of the certificate's lifetime remains. The Buzz routers set `tls=true` without a certificate resolver.
+
+Buzz also requests a random site hostname through `coolify-proxy:443` every 5 minutes. When that certificate is invalid or expires within 21 days, `/health` reports `"status": "degraded"` and the dashboard shows a warning. `/health` is also degraded while Buzz cannot obtain, save, or publish the certificate. `wildcard_certificate_error` then holds a short code, such as `not_configured` when `BUZZ_CLOUDFLARE_DNS_API_TOKEN` is missing or `issuance_failed`, and the application logs hold the detail. After a failure Buzz retries after 2, 5, 15, and 30 minutes, then every 30 minutes. `/health` keeps returning HTTP 200, and sites keep being served. Monitor the `status` field rather than the exact response body.
+
+Keep Buzz the only source of this certificate. A proxy-issued wildcard for the same names makes Traefik pick either certificate at random after a restart, and nothing renews the proxy's copy.
+
+Run one Buzz application per Coolify server. The file names in the dynamic directory, the Traefik router names, and the `buzz_buzz-data` volume name are fixed, so a second instance on the same proxy overwrites the first one's certificate and routes.
+
+The certificate's private key is part of `buzz-certificate.yaml`, so Coolify users who can manage the server see it under **Servers > Proxy > Dynamic Configurations**. Other team members see only the file names. Users who can manage the server can also read the proxy's `acme.json` and run commands there, so the key adds no new exposure. Treat that access as access to the certificate.
+
+## Keep The Proxy Default
+
+Buzz works with Coolify's default proxy configuration, so **Reset configuration to default** in **Servers > Proxy** is always safe for Buzz. When the proxy fails to restart or another application loses TLS, reset it and restart the proxy.
+
+Do not add Traefik dashboard or API labels, such as a router with `service=api@internal`, to the proxy. Buzz doesn't need them, and on the shared `coolify` network they expose Traefik's runtime state.
+
+Buzz writes only `buzz-certificate.yaml` and `buzz-routes.yaml`, each validated and replaced atomically, and never touches other files in `/data/coolify/proxy/dynamic`. One malformed file anywhere in that directory still stops Traefik from loading changes to every file there, and a proxy restart then drops all of their routes and certificates, including Coolify's own, until the file is fixed or removed. Coolify lists these files under **Servers > Proxy > Dynamic Configurations**. Do not edit Buzz's files there.
+
+## Enable Custom Domains
+
+Custom domains are disabled by default and need no proxy changes. Skip this section when the operator does not want Buzz to manage custom domains.
+
+1. Add these variables to the Buzz application and redeploy it:
+
+   ```text
+   BUZZ_CUSTOM_DOMAINS_ENABLED=true
+   BUZZ_CUSTOM_DOMAIN_INGRESS_IPS=your-public-ingress-ip
+   ```
+
+   List every public IPv4 or IPv6 address that reaches this proxy, separated by commas. Every DNS answer for a direct custom hostname must be public and present in this list.
+
+2. Open the site detail page of any site. The custom-domain section reports whether the control plane is ready.
+3. Add a custom hostname, publish the displayed DNS records, and select **Check ownership**.
+
+After ownership verifies, Buzz adds one generation-qualified `Host()` router to `buzz-routes.yaml`. Each version of that file carries a revision router on the reserved hostname `buzz-config-revision.invalid`, and Buzz treats a change as applied only once a probe through `coolify-proxy:443` shows Traefik serving that revision. Buzz needs no access to Traefik's API.
+
+Traefik requests each custom hostname's certificate over HTTP-01 through `letsencrypt`, Coolify's default resolver. If your `letsencrypt` resolver uses DNS-01, add a separate HTTP-01 resolver with its own ACME storage file in **Servers > Proxy** and set `BUZZ_TRAEFIK_CERT_RESOLVER` to its name. A DNS-01 resolver cannot issue certificates for customer zones.
+
+`BUZZ_MAX_CUSTOM_DOMAINS_PER_SITE`, `BUZZ_MAX_CUSTOM_DOMAINS_PER_USER`, and `BUZZ_MAX_CUSTOM_DOMAINS_SERVER_WIDE` limit pending and verified hostnames. A hostname awaiting withdrawal still counts.
+
+### Cloudflare Proxy Domains
+
+Onboarding is automatic. Buzz detects whether a hostname points directly at the ingress addresses or through Cloudflare and switches when DNS changes. Site owners must keep the TXT ownership record, enable orange-cloud proxying, and select Cloudflare **Full (strict)**. Bypass cache, redirects, WAF, Workers, Access, and managed challenges for `/.well-known/buzz-domain-check/*` and `/.well-known/acme-challenge/*`.
+
+Buzz uses no customer Cloudflare credentials. It validates resolved addresses against a bundled snapshot of Cloudflare's ranges. The snapshot fails closed after 180 days. Upgrade Buzz to refresh it.
+
+### Operator Endpoints
+
+Set `BUZZ_CUSTOM_DOMAIN_OPERATOR_TOKEN` to one or more bearer tokens separated by commas. Buzz then listens on the private port `8081`:
+
+- `GET /operator/domain-transitions` reports active DNS path transitions with their current evidence.
+- `POST /operator/domain-transitions/{claim_id}/cancel` cancels a transition. It returns `404` for an unknown claim and `409` when cancelling is unsafe.
+
+Do not route this port through the proxy.
+
+### Disable Custom Domains
+
+Set `BUZZ_CUSTOM_DOMAINS_ENABLED=false` and redeploy. Custom hostnames stop serving immediately. Buzz rewrites `buzz-routes.yaml` without their routers and logs `All custom-domain routers are withdrawn` once Traefik serves that revision. Keep `BUZZ_TRAEFIK_DYNAMIC_DIR` and the bind mount: without them Buzz cannot withdraw the routers, so it serves no custom hostname and `/health` reports `custom_domains_error: routers_unmanaged`.
 
 ## Update Or Roll Back
 
-To update, create a [cold backup](../manage-data-and-backups/#back-up-a-coolify-deployment), read the [release notes](https://github.com/infomiho/buzzstatic/releases) for the versions you skip past, then set the `image:` tag to the new release, push, and redeploy the application in Coolify.
+To update, create a [cold backup](../manage-data-and-backups/#back-up-a-coolify-deployment) and read the [release notes](https://github.com/infomiho/buzzstatic/releases) for the versions you skip past. Then replace `docker-compose.yml` with the file from this page for the new release, push, and redeploy the application in Coolify.
 
-Renovate's docker-compose manager reads the inline tag and opens a pull request per release. Copy the Compose file from this page again when the release notes mention deployment changes.
+Replace the whole file rather than only the `image:` tag, because the image, healthcheck, mounts, and environment change together. A 0.6 Compose file with only its tag bumped leaves the container unhealthy, because its healthcheck calls `uv`, which the image no longer ships.
 
-Database migrations run automatically when the new server starts and are forward-only: an older image refuses to start against the migrated database. To roll back, restore the pre-update backup per [Restore A Coolify Deployment](../manage-data-and-backups/#restore-a-coolify-deployment), set the `image:` tag back to the previous release, and redeploy.
+Every redeploy interrupts sites for a few seconds. When a custom hostname's router or certificate changes, it can answer `421` for up to about 90 seconds while Buzz checks it again.
+
+Database migrations run automatically when the new server starts and are forward-only: an older image refuses to start against the migrated database. Before migrating, Buzz saves the database to `/data/backups`. To roll back, set `docker-compose.yml` back to the previous release, [restore the pre-migration backup](../manage-data-and-backups/#restore-a-pre-migration-backup) named in the refusal message, and redeploy.
+
+## Upgrade From 0.6
+
+Earlier releases asked you to edit the proxy: a wildcard resolver, and for custom domains an HTTP provider, the Traefik API, and extra resolvers. This release replaces all of that. Do these steps in one maintenance window, in order. Sites are down for about 20 seconds in total, and the wildcard certificate stays valid throughout.
+
+### Prepare
+
+1. Create a [cold backup](../manage-data-and-backups/#back-up-a-coolify-deployment) and copy the complete configuration shown under **Servers > Proxy** to secure off-host storage. That copy is your proxy rollback. Coolify also saves a copy in `/data/coolify/proxy/backups` on every save and reset.
+2. Add `BUZZ_CLOUDFLARE_DNS_API_TOKEN` to the application's environment variables. Without the token Buzz doesn't issue a certificate, `/health` reports `not_configured`, and you must stop after step 5.
+3. Keep `BUZZ_TRAEFIK_CERT_RESOLVER` as it is until step 8. The new default, `letsencrypt`, may still be DNS-01 on your proxy, and a DNS-01 resolver cannot issue certificates for custom hostnames.
+4. Confirm that `BUZZ_DOMAIN` is a bare hostname such as `buzz.example.com`. Otherwise the new server exits at startup and every site goes down.
+
+### Deploy
+
+5. Replace `docker-compose.yml` in your deployment repository with the file from this page, keeping any local additions, then push and redeploy. Sites are down for about 7 seconds, and the proxy switches to Buzz's certificate without a TLS gap.
+
+   Then confirm that `/data/coolify/proxy/dynamic/buzz-certificate.yaml` exists on the Coolify host and that `/health` reports `"wildcard_certificate_error": null`. Do not continue otherwise: resetting the proxy without Buzz's certificate drops TLS on every Buzz host.
+
+   Until step 9, Traefik logs a provider error for `buzz-traefik-control` every few seconds. That is expected.
+
+### Clean Up The Proxy
+
+6. Check that every other application on this server is reachable on port `80`. Reset returns the `letsencrypt` resolver to HTTP-01, which those applications then renew with.
+7. Open **Servers > Proxy** and select **Reset configuration to default**. Coolify saves the default configuration immediately and keeps running the old one until the proxy restarts. The default has no `cloudflare`, `buzz-custom`, or `buzz-production` resolver, no `CF_DNS_API_TOKEN`, no `--api=true`, `buzz-admin`, or `--providers.http` flags, and no `wildcard-certs` or `api@internal` labels. Check the saved configuration for them.
+
+   If another application cannot use HTTP-01, skip Reset and delete only those Buzz items by hand, keeping your DNS-01 `letsencrypt` and its token. Then add a separate HTTP-01 resolver for custom domains as described in [Enable Custom Domains](#enable-custom-domains).
+
+8. Delete the old wildcard and the old resolver setting:
+   - Under **Servers > Proxy > TLS Certificates**, delete the entry for `buzz.example.com` and `*.buzz.example.com`, if there is one.
+   - Leave `/data/coolify/proxy/acme-cloudflare.json` in place if you used the separate `cloudflare` resolver. Traefik ignores it without that resolver, and keeping it makes a rollback free of TLS gaps. Delete it once you no longer need to roll back.
+   - Delete `BUZZ_TRAEFIK_CERT_RESOLVER` from the application, unless it names an HTTP-01 resolver that still exists.
+9. Restart the proxy, then immediately redeploy the application. Sites are down for about 3 seconds and then about 7 seconds. Custom hostnames show the default certificate and then answer `421` for up to about 90 seconds while `letsencrypt` issues their certificates and Buzz checks them again.
+10. Remove these application environment variables. No redeploy is needed. Coolify adds `BUZZ_TRAEFIK_CERT_RESOLVER=letsencrypt` back from the Compose file, which is correct.
+    - `BUZZ_TRAEFIK_CONTROL_TOKEN`, `BUZZ_TRAEFIK_CONTROL_PORT`, `BUZZ_TRAEFIK_API_URL`, and `BUZZ_TRAEFIK_API_AUTHORIZATION`
+    - `BUZZ_CUSTOM_DOMAIN_ACME_CA_SERVER`, `BUZZ_CUSTOM_DOMAIN_ROUTING_ENABLED`, `BUZZ_CUSTOM_DOMAIN_ADMISSION_ENABLED`, `BUZZ_CLOUDFLARE_DIAGNOSTICS_ENABLED`, `BUZZ_CLOUDFLARE_ACTIVATION_ENABLED`, and `BUZZ_AUTOMATIC_DOMAIN_TRANSITION_ADMISSION_ENABLED`
+
+    Save `BUZZ_TRAEFIK_CONTROL_TOKEN` with the proxy copy first if you may roll back.
+
+### Verify
+
+11. On the Coolify host, compare the serial the proxy serves with the one Buzz stored:
+
+    ```bash
+    openssl s_client -connect buzz.example.com:443 -servername check.buzz.example.com </dev/null 2>/dev/null | openssl x509 -noout -serial
+    docker run --rm -v buzz_buzz-data:/data:ro python:3.12-slim python -c "import json; print(json.load(open('/data/tls/wildcard-certificate.json'))['chain'])" | openssl x509 -noout -serial
+    ```
+
+    Both lines must match. With custom domains enabled, also open a site detail page and confirm that the control plane is ready.
+
+### Roll Back
+
+1. Add back the variables the old release needs: `BUZZ_TRAEFIK_CONTROL_TOKEN` with the value from the saved proxy configuration, and `BUZZ_TRAEFIK_CERT_RESOLVER` with its previous value.
+2. Paste the saved proxy configuration into **Servers > Proxy**, save it, and restart the proxy. Buzz's certificate keeps being served.
+3. Restore the previous `docker-compose.yml`, push, and redeploy.
+4. Delete `buzz-certificate.yaml` and `buzz-routes.yaml` from `/data/coolify/proxy/dynamic`. Otherwise stale routes and the random certificate pick return.
+
+Traefik orders its own wildcard only once Buzz's file is gone, so sites show the default certificate until that order completes, a few seconds in rehearsal and longer with Let's Encrypt and Cloudflare. With the separate `cloudflare` resolver and `acme-cloudflare.json` kept, Traefik serves the old certificate again without a gap.

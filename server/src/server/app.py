@@ -1,5 +1,6 @@
 import logging
 from collections.abc import Callable
+from dataclasses import asdict
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlsplit
@@ -20,6 +21,7 @@ from .analytics import AnalyticsRecorder, build_analytics_event
 from . import __version__
 from .api_models import HealthResponse, VersionResponse
 from .auth_service import DEV_SESSION_ID, AuthService, Identity
+from .certificate_health import CertificateHealth, WildcardCertificateMonitor
 from .cookies import access_cookie_name, session_cookie_name, set_access_cookie
 from .serving_content_roots import ServingContentRoots
 from .custom_domains import (
@@ -49,6 +51,7 @@ from .site_path import (
 )
 from .templating import STATIC_DIR, templates
 from .utils import extract_subdomain, is_control_host
+from .wildcard_certificate import WildcardCertificateRuntime
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +152,17 @@ class DeploymentBodyLimitMiddleware:
         await response(scope, receive, send)
 
 
+def wildcard_certificate_monitor(settings: Settings) -> WildcardCertificateMonitor | None:
+    if (
+        settings.dev_mode
+        or not settings.domain
+        or ":" in settings.domain
+        or not settings.custom_domain_origin_host
+    ):
+        return None
+    return WildcardCertificateMonitor(settings.custom_domain_origin_host, settings.domain)
+
+
 def origin_matches_host(origin: str, host: str, scheme: str) -> bool:
     try:
         parsed_origin = urlsplit(origin)
@@ -168,6 +182,10 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
         CustomDomainsConfig.from_settings(settings), connect=database.connect
     )
     content_roots = ServingContentRoots()
+    certificate_monitor = wildcard_certificate_monitor(settings)
+    wildcard_certificate = WildcardCertificateRuntime.from_settings(
+        settings, on_published=certificate_monitor.check_soon if certificate_monitor else None
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -182,17 +200,23 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
             )
         app.state.access.load_visibility()
         await custom_domains.start()
+        wildcard_certificate.start()
         analytics_started = False
         try:
             app.state.analytics.start()
             analytics_started = True
+            if certificate_monitor:
+                certificate_monitor.start()
             yield
         finally:
+            if certificate_monitor:
+                await certificate_monitor.stop()
             if analytics_started:
                 try:
                     await app.state.analytics.stop()
                 except Exception:
                     logger.exception("Analytics shutdown failed")
+            await wildcard_certificate.stop()
             await custom_domains.stop()
             app.state.access.close()
 
@@ -271,7 +295,13 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
     )
     app.state.analytics = AnalyticsRecorder(database.connect)
     app.state.custom_domains = custom_domains
+    app.state.wildcard_certificate = wildcard_certificate
     app.state.content_roots = content_roots
+    app.state.certificate_monitor = certificate_monitor
+
+    def latest_certificate_health() -> CertificateHealth | None:
+        monitor = app.state.certificate_monitor
+        return monitor.health if monitor else None
 
     @app.exception_handler(BadRequest)
     async def bad_request_handler(request: Request, exc: BadRequest):
@@ -413,7 +443,19 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
         tags=["System"],
     )
     async def health():
-        return {"status": "ok"}
+        certificate = latest_certificate_health()
+        certificate_failing = bool(certificate and not certificate.ok)
+        degraded = (
+            certificate_failing
+            or bool(wildcard_certificate.error_code)
+            or bool(custom_domains.error_code)
+        )
+        return {
+            "status": "degraded" if degraded else "ok",
+            "wildcard_certificate": asdict(certificate) if certificate else None,
+            "wildcard_certificate_error": wildcard_certificate.error_code,
+            "custom_domains_error": custom_domains.error_code,
+        }
 
     @app.get(
         "/version",
@@ -451,10 +493,18 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
                 has_sites = bool(
                     SiteStore(conn, settings.sites_dir).list_for_owner(identity.user.id)
                 )
+            certificate = latest_certificate_health()
             return templates.TemplateResponse(
                 request,
                 "dashboard.html",
-                {**page_context, "user": identity.user, "has_sites": has_sites},
+                {
+                    **page_context,
+                    "user": identity.user,
+                    "has_sites": has_sites,
+                    "certificate_warning": (
+                        certificate.message(settings.domain) if certificate else None
+                    ),
+                },
             )
         return templates.TemplateResponse(request, "login.html", page_context)
 

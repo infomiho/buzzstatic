@@ -590,12 +590,13 @@ class DomainClaimStore:
         ).fetchone()
         return row is not None
 
-    def has_routed_claim(self) -> bool:
-        row = self._conn.execute(
-            """SELECT 1 FROM custom_domain_claims
-            WHERE route_status IN ('publishing', 'routed', 'removing') LIMIT 1"""
-        ).fetchone()
-        return row is not None
+    def routed_hostnames(self) -> list[str]:
+        rows = self._conn.execute(
+            """SELECT hostname FROM custom_domain_claims
+            WHERE route_status IN ('publishing', 'routed', 'removing')
+            ORDER BY hostname"""
+        ).fetchall()
+        return [row["hostname"] for row in rows]
 
     def site_name_for(self, claim_id: int) -> str | None:
         row = self._conn.execute(
