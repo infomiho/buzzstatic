@@ -65,7 +65,7 @@ jobs:
         working-directory: docs/site
         run: |
           npm ci
-          npm audit --omit=dev
+          node scripts/check-audit.mjs
           npm run check
           npm run build
 
