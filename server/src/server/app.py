@@ -504,6 +504,7 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
                     "certificate_warning": (
                         certificate.message(settings.domain) if certificate else None
                     ),
+                    "certificate_severity": certificate.severity if certificate else None,
                 },
             )
         return templates.TemplateResponse(request, "login.html", page_context)
