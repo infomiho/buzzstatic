@@ -29,7 +29,7 @@ services:
       - traefik-dynamic:/traefik/dynamic
 
   server:
-    image: ghcr.io/infomiho/buzzstatic:0.6.1 # x-release-please-version
+    image: ghcr.io/infomiho/buzzstatic:0.7.0 # x-release-please-version
     restart: unless-stopped
     env_file: .env
     environment:
