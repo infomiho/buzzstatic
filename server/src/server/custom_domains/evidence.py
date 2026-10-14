@@ -392,7 +392,7 @@ class DomainEvidenceCollector:
             claim,
             self._result(ownership, deadline, "ownership_dns_unavailable"),
             dns,
-            self._result(router, deadline, "runtime_api_unavailable"),
+            self._result(router, deadline, "routing_config_not_loaded"),
             self._result(origin, deadline, "origin_unavailable"),
             self._range_result(),
         )

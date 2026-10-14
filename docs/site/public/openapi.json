@@ -64,6 +64,67 @@
         "title": "AutomaticDomainTransitionCapability",
         "type": "object"
       },
+      "CertificateHealthResponse": {
+        "properties": {
+          "checked_at": {
+            "format": "date-time",
+            "title": "Checked At",
+            "type": "string"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "proxy_unreachable",
+                  "certificate_invalid",
+                  "certificate_expiring"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "ok",
+          "reason",
+          "detail",
+          "expires_at",
+          "checked_at"
+        ],
+        "title": "CertificateHealthResponse",
+        "type": "object"
+      },
       "CloudflareCapability": {
         "properties": {
           "detail": {
@@ -1039,10 +1100,57 @@
       },
       "HealthResponse": {
         "properties": {
+          "custom_domains_error": {
+            "anyOf": [
+              {
+                "const": "routers_unmanaged",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Custom-domain routers exist but `BUZZ_TRAEFIK_DYNAMIC_DIR` is unset, so Buzz serves no custom domain until it is set. The server log has the detail.",
+            "title": "Custom Domains Error"
+          },
           "status": {
-            "const": "ok",
+            "description": "`degraded` reports a problem that does not stop Buzz from serving.",
+            "enum": [
+              "ok",
+              "degraded"
+            ],
             "title": "Status",
             "type": "string"
+          },
+          "wildcard_certificate": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CertificateHealthResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Latest check of the certificate the proxy serves for site subdomains."
+          },
+          "wildcard_certificate_error": {
+            "anyOf": [
+              {
+                "enum": [
+                  "not_configured",
+                  "issuance_failed",
+                  "storage_failed",
+                  "publish_failed",
+                  "check_failed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why Buzz cannot obtain, save or publish that certificate. The server log has the detail. Buzz retries after 2, 5, 15 and 30 minutes, then every 30 minutes.",
+            "title": "Wildcard Certificate Error"
           }
         },
         "required": [

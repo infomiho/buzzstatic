@@ -261,6 +261,33 @@ def test_origin_probe_rejects_non_exact_response(activation_db, monkeypatch, res
         probe_origin("traefik", claim)
 
 
+@pytest.mark.parametrize("status", [404, 502, 503, 504])
+def test_proxy_answers_without_buzz_behind_it_are_transient(activation_db, monkeypatch, status):
+    claim = routed_claim(activation_db)
+    monkeypatch.setattr("socket.create_connection", lambda address, timeout: FakeSocket())
+    monkeypatch.setattr("ssl.create_default_context", lambda: FakeTlsContext(FakeTls()))
+    monkeypatch.setattr(
+        "http.client.HTTPResponse",
+        lambda socket: FakeHttpResponse(status=status, body=b"404 page not found", claim_id=None),
+    )
+
+    with pytest.raises(ActivationFailed, match="origin_unavailable"):
+        probe_origin("traefik", claim)
+
+
+def test_buzz_answer_with_an_error_status_is_a_mismatch(activation_db, monkeypatch):
+    claim = routed_claim(activation_db)
+    monkeypatch.setattr("socket.create_connection", lambda address, timeout: FakeSocket())
+    monkeypatch.setattr("ssl.create_default_context", lambda: FakeTlsContext(FakeTls()))
+    monkeypatch.setattr(
+        "http.client.HTTPResponse",
+        lambda socket: FakeHttpResponse(status=404, claim_id=str(claim.id)),
+    )
+
+    with pytest.raises(ActivationFailed, match="challenge_mismatch"):
+        probe_origin("traefik", claim)
+
+
 def test_origin_probe_rejects_untrusted_tls(activation_db, monkeypatch):
     claim = routed_claim(activation_db)
     monkeypatch.setattr("socket.create_connection", lambda address, timeout: FakeSocket())

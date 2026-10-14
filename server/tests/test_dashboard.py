@@ -2,6 +2,7 @@ import hashlib
 import re
 import secrets
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -351,7 +352,7 @@ class TestCustomDomains:
 
         app = make_app(
             custom_domains_enabled=True,
-            traefik_control_token="configured",
+            traefik_dynamic_dir=Path("/traefik-dynamic"),
             custom_domain_ingress_ips=frozenset({"8.8.8.8"}),
             max_custom_domains_per_site=10,
         )

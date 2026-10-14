@@ -4,6 +4,7 @@ application settings."""
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from ..settings import Settings
 
@@ -15,11 +16,8 @@ class CustomDomainsConfig:
     custom_domain_operator_token: str | None
     custom_domain_origin_host: str | None
     custom_domain_reconcile_seconds: float
-    traefik_api_url: str | None
-    traefik_api_authorization: str | None
     traefik_cert_resolver: str | None
-    traefik_control_port: int
-    traefik_control_token: str | None
+    traefik_dynamic_dir: Path | None
     traefik_https_entrypoint: str
     traefik_service: str
 
@@ -31,11 +29,8 @@ class CustomDomainsConfig:
             custom_domain_operator_token=settings.custom_domain_operator_token,
             custom_domain_origin_host=settings.custom_domain_origin_host,
             custom_domain_reconcile_seconds=settings.custom_domain_reconcile_seconds,
-            traefik_api_url=settings.traefik_api_url,
-            traefik_api_authorization=settings.traefik_api_authorization,
             traefik_cert_resolver=settings.traefik_cert_resolver,
-            traefik_control_port=settings.traefik_control_port,
-            traefik_control_token=settings.traefik_control_token,
+            traefik_dynamic_dir=settings.traefik_dynamic_dir,
             traefik_https_entrypoint=settings.traefik_https_entrypoint,
             traefik_service=settings.traefik_service,
         )

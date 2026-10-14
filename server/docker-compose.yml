@@ -1,94 +1,50 @@
+# Buzz standalone stack. Replace this file on every update and never edit it:
+# server settings live in .env, local changes in compose.override.yml.
+# Traefik reads its static configuration from the TRAEFIK_* variables below, so an
+# override can add or change single keys. Never give Traefik a command: any
+# command-line argument makes it ignore these variables.
+# Buzz obtains the certificate for BUZZ_DOMAIN and *.BUZZ_DOMAIN itself and
+# publishes it, with custom-domain routers, through the shared dynamic volume.
 services:
   traefik:
-    image: traefik:v3.6
+    image: traefik:v3.7.14
     restart: unless-stopped
-    command:
-      - --providers.docker=true
-      - --providers.docker.exposedbydefault=false
-      - --providers.http=${BUZZ_CUSTOM_DOMAINS_ENABLED:-false}
-      - --providers.http.endpoint=http://server:8081/traefik
-      - "--providers.http.headers.Authorization=Bearer ${BUZZ_TRAEFIK_CONTROL_TOKEN:-}"
-      - --providers.http.pollInterval=5s
-      - --providers.http.pollTimeout=2s
-      - --providers.http.maxResponseBodySize=1048576
-      - --api=true
-      - --entrypoints.web.address=:80
-      - --entrypoints.web.http.redirections.entrypoint.to=websecure
-      - --entrypoints.web.http.redirections.entrypoint.scheme=https
-      - --entrypoints.websecure.address=:443
-      - --entrypoints.buzz-admin.address=:8082
-      - --certificatesresolvers.cloudflare.acme.email=${ACME_EMAIL}
-      - --certificatesresolvers.cloudflare.acme.storage=/letsencrypt/acme.json
-      - --certificatesresolvers.cloudflare.acme.dnschallenge.provider=cloudflare
-      - --certificatesresolvers.cloudflare.acme.dnschallenge.resolvers=1.1.1.1:53,8.8.8.8:53
-      - --certificatesresolvers.buzz-custom.acme.email=${ACME_EMAIL}
-      - --certificatesresolvers.buzz-custom.acme.storage=/letsencrypt/acme.json
-      - --certificatesresolvers.buzz-custom.acme.httpchallenge.entrypoint=web
-      - --certificatesresolvers.buzz-custom.acme.caserver=${BUZZ_CUSTOM_DOMAIN_ACME_CA_SERVER:-https://acme-staging-v02.api.letsencrypt.org/directory}
     environment:
-      - CF_DNS_API_TOKEN=${CF_API_TOKEN}
+      TRAEFIK_PROVIDERS_DOCKER: "true"
+      TRAEFIK_PROVIDERS_DOCKER_EXPOSEDBYDEFAULT: "false"
+      TRAEFIK_PROVIDERS_FILE_DIRECTORY: /traefik/dynamic
+      TRAEFIK_PROVIDERS_FILE_WATCH: "true"
+      TRAEFIK_ENTRYPOINTS_WEB_ADDRESS: ":80"
+      TRAEFIK_ENTRYPOINTS_WEB_HTTP_REDIRECTIONS_ENTRYPOINT_TO: websecure
+      TRAEFIK_ENTRYPOINTS_WEB_HTTP_REDIRECTIONS_ENTRYPOINT_SCHEME: https
+      TRAEFIK_ENTRYPOINTS_WEBSECURE_ADDRESS: ":443"
+      TRAEFIK_CERTIFICATESRESOLVERS_LETSENCRYPT_ACME_STORAGE: /letsencrypt/acme-http.json
+      TRAEFIK_CERTIFICATESRESOLVERS_LETSENCRYPT_ACME_HTTPCHALLENGE_ENTRYPOINT: web
     ports:
       - "80:80"
       - "443:443"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - traefik-certs:/letsencrypt
-    labels:
-      - traefik.enable=true
-      - traefik.http.routers.wildcard-certs.tls.certresolver=cloudflare
-      - traefik.http.routers.wildcard-certs.tls.domains[0].main=${BUZZ_DOMAIN}
-      - traefik.http.routers.wildcard-certs.tls.domains[0].sans=*.${BUZZ_DOMAIN}
-      - "traefik.http.routers.buzz-runtime-api.rule=PathPrefix(`/api`) && Header(`Authorization`, `Bearer ${BUZZ_TRAEFIK_CONTROL_TOKEN:-}`)"
-      - traefik.http.routers.buzz-runtime-api.entrypoints=buzz-admin
-      - traefik.http.routers.buzz-runtime-api.service=api@internal
+      - traefik-dynamic:/traefik/dynamic
 
   server:
     image: ghcr.io/infomiho/buzzstatic:0.6.1 # x-release-please-version
     restart: unless-stopped
+    env_file: .env
     environment:
-      - BUZZ_DATA_DIR=/data
-      - BUZZ_DOMAIN=${BUZZ_DOMAIN}
-      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
-      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
-      - BUZZ_ANALYTICS_SECRET=${BUZZ_ANALYTICS_SECRET:-}
-      - BUZZ_MAX_ARCHIVE_BYTES=${BUZZ_MAX_ARCHIVE_BYTES:-524288000}
-      - BUZZ_MAX_SITE_BYTES=${BUZZ_MAX_SITE_BYTES:-524288000}
-      - BUZZ_MAX_SITE_FILES=${BUZZ_MAX_SITE_FILES:-10000}
-      - BUZZ_MAX_ARCHIVE_PATH_BYTES=${BUZZ_MAX_ARCHIVE_PATH_BYTES:-1024}
-      - BUZZ_ALLOW_REGISTRATION=${BUZZ_ALLOW_REGISTRATION:-true}
-      - BUZZ_ALLOWED_GITHUB_USERS=${BUZZ_ALLOWED_GITHUB_USERS:-}
-      - BUZZ_CUSTOM_DOMAINS_ENABLED=${BUZZ_CUSTOM_DOMAINS_ENABLED:-false}
-      - BUZZ_TRAEFIK_CONTROL_TOKEN=${BUZZ_TRAEFIK_CONTROL_TOKEN:-}
-      - BUZZ_TRAEFIK_API_URL=http://traefik:8082/api
-      - "BUZZ_TRAEFIK_API_AUTHORIZATION=Bearer ${BUZZ_TRAEFIK_CONTROL_TOKEN:-}"
-      - BUZZ_TRAEFIK_HTTPS_ENTRYPOINT=websecure
-      - BUZZ_CUSTOM_DOMAIN_ROUTING_ENABLED=${BUZZ_CUSTOM_DOMAIN_ROUTING_ENABLED:-false}
-      - BUZZ_CUSTOM_DOMAIN_ADMISSION_ENABLED=${BUZZ_CUSTOM_DOMAIN_ADMISSION_ENABLED:-false}
-      - BUZZ_CLOUDFLARE_DIAGNOSTICS_ENABLED=${BUZZ_CLOUDFLARE_DIAGNOSTICS_ENABLED:-false}
-      - BUZZ_CLOUDFLARE_ACTIVATION_ENABLED=${BUZZ_CLOUDFLARE_ACTIVATION_ENABLED:-false}
-      - BUZZ_AUTOMATIC_DOMAIN_TRANSITION_ADMISSION_ENABLED=${BUZZ_AUTOMATIC_DOMAIN_TRANSITION_ADMISSION_ENABLED:-false}
-      - BUZZ_CUSTOM_DOMAIN_OPERATOR_TOKEN=${BUZZ_CUSTOM_DOMAIN_OPERATOR_TOKEN:-}
-      - BUZZ_MAX_CUSTOM_DOMAINS_PER_SITE=${BUZZ_MAX_CUSTOM_DOMAINS_PER_SITE:-5}
-      - BUZZ_MAX_CUSTOM_DOMAINS_PER_USER=${BUZZ_MAX_CUSTOM_DOMAINS_PER_USER:-20}
-      - BUZZ_MAX_CUSTOM_DOMAINS_SERVER_WIDE=${BUZZ_MAX_CUSTOM_DOMAINS_SERVER_WIDE:-1000}
-      - BUZZ_CUSTOM_DOMAIN_INGRESS_IPS=${BUZZ_CUSTOM_DOMAIN_INGRESS_IPS:-}
-      - BUZZ_CUSTOM_DOMAIN_ORIGIN_HOST=${BUZZ_CUSTOM_DOMAIN_ORIGIN_HOST:-traefik}
-      - BUZZ_TRAEFIK_CERT_RESOLVER=${BUZZ_TRAEFIK_CERT_RESOLVER:-buzz-custom}
-      - BUZZ_CUSTOM_DOMAIN_RECONCILE_SECONDS=${BUZZ_CUSTOM_DOMAIN_RECONCILE_SECONDS:-5}
+      BUZZ_DATA_DIR: /data
+      BUZZ_TRAEFIK_DYNAMIC_DIR: /traefik-dynamic
+      BUZZ_TRAEFIK_HTTPS_ENTRYPOINT: websecure
+      BUZZ_CUSTOM_DOMAIN_ORIGIN_HOST: traefik
+      BUZZ_TRAEFIK_CERT_RESOLVER: letsencrypt
+      BUZZ_CLOUDFLARE_DNS_API_TOKEN: ${BUZZ_CLOUDFLARE_DNS_API_TOKEN:?Set BUZZ_CLOUDFLARE_DNS_API_TOKEN in .env}
     volumes:
       - buzz-data:/data
-    expose:
-      - "8080"
-      - "8081"
-    healthcheck:
-      test: ["CMD", "uv", "run", "python", "-m", "server.healthcheck"]
-      interval: 30s
-      timeout: 5s
-      start_period: 10s
-      retries: 3
+      - traefik-dynamic:/traefik-dynamic
     labels:
       - traefik.enable=true
-      - traefik.http.routers.buzz.rule=Host(`${BUZZ_DOMAIN}`)
+      - traefik.http.routers.buzz.rule=Host(`${BUZZ_DOMAIN:?Set BUZZ_DOMAIN in .env to the bare dashboard hostname, such as buzz.example.com}`)
       - traefik.http.routers.buzz.entrypoints=websecure
       - traefik.http.routers.buzz.tls=true
       - traefik.http.routers.buzz-wildcard.rule=HostRegexp(`.+\.${BUZZ_DOMAIN}`)
@@ -101,3 +57,5 @@ volumes:
     name: buzz_buzz-data
   traefik-certs:
     name: buzz_traefik-certs
+  traefik-dynamic:
+    name: buzz_traefik-dynamic

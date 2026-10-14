@@ -25,6 +25,8 @@ Both bundled deployments mount `buzz_buzz-data` at `/data`. Back up its contents
 
 - `/data/data.db` contains sites, owners, sessions, deployment tokens, and analytics.
 - `/data/sites` contains deployed files and deployment operation journals.
+- `/data/backups` contains the [pre-migration copies](#restore-a-pre-migration-backup) of `data.db`.
+- `/data/tls` contains the wildcard certificate, its private key, and the ACME account key. Without it Buzz orders a new certificate on start.
 
 ![Required Buzz data, configuration, and platform state in a complete recovery set](../../../assets/diagrams/complete-recovery-set.svg)
 
@@ -37,19 +39,20 @@ A complete host recovery also needs:
 - The exact deployed Git revision.
 - Environment and secret values stored outside source control.
 - The active Compose files and local overrides.
-- For standalone Docker Compose, the `buzz_traefik-certs` volume containing ACME certificate state.
-- For Coolify, the application's repository, deployment reference, Compose path, Raw Compose setting, environment variables, and domain settings, plus the saved proxy configuration and its certificate state.
+- For standalone Docker Compose, the `buzz_traefik-certs` volume containing the custom-domain certificates.
+  The `buzz_traefik-dynamic` volume holds files Buzz regenerates from `/data` and needs no backup.
+- For Coolify, the application's repository, deployment reference, Compose path, Raw Compose setting, and environment variables, plus the saved proxy configuration and its certificate state. `buzz-certificate.yaml` and `buzz-routes.yaml` in `/data/coolify/proxy/dynamic` need no backup.
 
 Treat this recovery set as sensitive. It includes identity data, token hashes, hosted content, TLS private keys, and deployment secrets. Encrypt off-host backups and restrict operator access.
 
 ## Back Up Standalone Docker Compose
 
-Run these commands from `server`, where `docker-compose.yml` and `.env` are active. They stop both Buzz and its bundled Traefik proxy.
+Run these commands from the deployment directory, where `docker-compose.yml` and `.env` are active. They stop both Buzz and its bundled Traefik proxy.
 
-1. Record the deployed revision and copy `.env` and every active Compose override to secure off-host storage:
+1. Record the running release and copy `docker-compose.yml`, `.env`, and `compose.override.yml` to secure off-host storage:
 
    ```bash
-   git rev-parse HEAD
+   docker compose images
    ```
 
 2. Check that the backup destination has room for both volumes. Compressed archives can temporarily require substantial host space:
@@ -111,7 +114,7 @@ Coolify controls the application lifecycle, while the Docker host owns `buzz_buz
    ```
 
 4. Confirm that the archive contains `./data.db` and `./sites/`. Move it and `buzz-backups.sha256` to encrypted off-host storage, then run `sha256sum --check buzz-backups.sha256` there.
-5. Preserve Coolify's proxy certificate state through the backup method used for the Coolify server. The Buzz data archive doesn't include proxy certificates.
+5. Preserve Coolify's proxy certificate state through the backup method used for the Coolify server. It holds the custom-domain certificates. The Buzz data archive holds the wildcard certificate.
 6. Use Coolify's application controls to start Buzz again. Confirm that the application is running and request `https://buzz.example.com/health`.
 
 Buzz doesn't document or test a hot-backup method. Copying `/data` while Buzz accepts deployments or analytics writes may not produce a consistent restore point.
@@ -159,15 +162,15 @@ The restored data and certificate archives can need more free space than their c
        name: buzz_traefik-certs-restored
    ```
 
-6. Restore the recorded Git revision, environment values, and other Compose overrides. Start Buzz with the restore override last:
+6. Restore the recorded Compose file, `.env`, and `compose.override.yml`. Start Buzz with the restore override last. Explicit `-f` flags disable automatic loading of `compose.override.yml`, so list it when it exists:
 
    ```bash
-   docker compose -f docker-compose.yml -f compose.restore.yml up -d
+   docker compose -f docker-compose.yml -f compose.override.yml -f compose.restore.yml up -d
    ```
 
 7. Complete the [Restore Acceptance Checks](#restore-acceptance-checks) before deleting any original volume.
 
-If acceptance fails, run `docker compose -f docker-compose.yml -f compose.restore.yml down`, then start the original Compose configuration without `compose.restore.yml`. Investigate the restored volumes without changing the originals.
+If acceptance fails, run `docker compose -f docker-compose.yml -f compose.override.yml -f compose.restore.yml down`, then start the original Compose configuration without `compose.restore.yml`. Investigate the restored volumes without changing the originals.
 
 ## Restore A Coolify Deployment
 
@@ -188,18 +191,37 @@ Do not overwrite `buzz_buzz-data`. Coolify's Raw Compose deployment treats the r
    docker run --rm -v buzz_buzz-data-restored:/data -v "$PWD":/backup:ro alpine tar xzf /backup/buzz-data.tar.gz -C /data
    ```
 
-5. Prepare a recovery revision of `docker-compose.coolify.yml` that changes the top-level `buzz-data` volume name from `buzz_buzz-data` to `buzz_buzz-data-restored`. Point the Coolify application at that revision and restore the recorded application environment and settings.
+5. Prepare a recovery revision of the deployment repository's `docker-compose.yml` that changes the top-level `buzz-data` volume name from `buzz_buzz-data` to `buzz_buzz-data-restored`. Point the Coolify application at that revision and restore the recorded application environment and settings.
 6. Restore the saved proxy configuration and certificate state only as part of the Coolify server's established recovery procedure. The Buzz data restore doesn't require replacing a healthy proxy.
 7. Deploy the recovery revision through Coolify and complete the [Restore Acceptance Checks](#restore-acceptance-checks).
 
 If acceptance fails, stop the application, point it back to the previously recorded revision and `buzz_buzz-data`, and deploy through Coolify. Keep both volumes until you understand the failure.
+
+## Restore A Pre-Migration Backup
+
+When a new release has pending database migrations, Buzz copies `data.db` to `/data/backups/data-schema<version>-<timestamp>.db` before migrating and keeps the two newest copies. If the copy fails, Buzz refuses to start instead of migrating. These copies make an update reversible. They don't replace cold backups: they cover only `data.db`, and they live on the same volume.
+
+An older release that refuses the migrated database names the backup to restore:
+
+```
+Database schema version 18 is newer than supported version 17: ... restore /data/backups/data-schema17-20261009T104832Z.db over /data/data.db ...
+```
+
+With Buzz stopped and the previous release's Compose file in place, copy that file over the database:
+
+```bash
+docker run --rm -v buzz_buzz-data:/data alpine \
+  sh -c 'cp /data/backups/data-schema17-20261009T104832Z.db /data/data.db && rm -f /data/data.db-journal'
+```
+
+Then start Buzz. Restoring discards database changes made after the update, such as new sites, deployments, tokens, and sessions. Files deployed after the update stay on disk but are no longer served. Redeploy those sites.
 
 ## Restore Acceptance Checks
 
 Do not delete the original data or certificate volumes until all checks pass:
 
 1. Confirm that the Buzz server and proxy remain running and that server logs contain no database or deployment-reconciliation error.
-2. Request `https://buzz.example.com/health` and expect `{"status":"ok"}`.
+2. Request `https://buzz.example.com/health` and expect `"status":"ok"`. It can report `degraded` for a few minutes after the start, until Buzz has published its certificate and checked it.
 3. Sign in with a known GitHub account and confirm that the dashboard shows the expected owned sites.
 4. Open a known site URL and compare a distinctive file or page with the backup source.
 5. Deploy or redeploy a disposable site, open it, and delete it. This checks database writes and site filesystem writes.

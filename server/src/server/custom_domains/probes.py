@@ -18,6 +18,9 @@ MAX_RESPONSE_BYTES = 16 * 1024
 PROBE_TIMEOUT_SECONDS = 3
 MAX_RANGE_AGE = timedelta(days=180)
 MAX_HEADER_VALUE = 512
+# Traefik answers these itself while Buzz is not registered behind it, such as
+# during a Buzz restart. They say nothing about which site the hostname serves.
+PROXY_UNAVAILABLE_STATUSES = frozenset({404, 502, 503, 504})
 MAX_CONCURRENT_CLAIM_CHECKS = 20
 MAX_RESOLVED_ADDRESSES = 16
 ADDRESS_FAMILIES = ("A", "AAAA")
@@ -164,12 +167,15 @@ def probe_origin(origin_host: str, claim: DomainClaim) -> None:
         raise ActivationFailed("tls_invalid") from exc
     except (OSError, http.client.HTTPException) as exc:
         raise ActivationFailed("origin_unavailable") from exc
+    claim_header = response.getheader("X-Buzz-Domain-Claim")
+    if claim_header is None and response.status in PROXY_UNAVAILABLE_STATUSES:
+        raise ActivationFailed("origin_unavailable")
     expected = f"buzz-domain-check={claim.challenge_token};site={claim.site_name}".encode()
     if (
         response.status != 200
         or len(body) > MAX_RESPONSE_BYTES
         or body != expected
-        or response.getheader("X-Buzz-Domain-Claim") != str(claim.id)
+        or claim_header != str(claim.id)
     ):
         raise ActivationFailed("challenge_mismatch")
 

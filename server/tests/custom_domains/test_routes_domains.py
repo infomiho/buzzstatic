@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -49,7 +51,7 @@ def domain_api(make_app, database):
             max_custom_domains_per_site=5,
             max_custom_domains_per_user=20,
             max_custom_domains_server_wide=1000,
-            traefik_control_token="configured",
+            traefik_dynamic_dir=Path("/traefik-dynamic"),
             domain="buzz.example.com",
         )
         settings.update(overrides)

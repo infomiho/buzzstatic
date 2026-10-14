@@ -18,7 +18,7 @@ def _range_state(error=None):
 def _capabilities(**overrides):
     defaults = dict(
         enabled=True,
-        control_token="configured",
+        control_configured=True,
         ingress_ips=frozenset({"8.8.8.8"}),
         control=None,
         diagnostician=None,
@@ -38,7 +38,7 @@ def test_disabled_when_custom_domains_off():
 
 
 def test_unready_without_configured_control_plane():
-    capability = _capabilities(control_token="")
+    capability = _capabilities(control_configured=False)
     assert capability.status == "unready"
     assert "control plane is not configured" in capability.detail
 

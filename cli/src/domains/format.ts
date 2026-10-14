@@ -17,6 +17,7 @@ function ownership(claim: DomainClaim): string {
 
 function routerStatus(claim: DomainClaim): string {
   const errors: Record<string, string> = {
+    routing_config_not_loaded: "Waiting for Traefik to load Buzz's routing file",
     runtime_api_unavailable: "Traefik runtime status unavailable; retrying",
     router_not_observed: "Router not yet observed in Traefik",
     router_configuration_mismatch: "Router configuration mismatch; retrying",

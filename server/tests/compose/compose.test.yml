@@ -1,0 +1,30 @@
+# Applied as compose.override.yml by boot-test.sh. Traefik's ACME resolver points
+# at a closed port, boot-test.sh does the same for Buzz, and by default the stack
+# runs on an internal network, so nothing reaches Let's Encrypt, Cloudflare, or PyPI.
+services:
+  traefik:
+    environment:
+      TRAEFIK_PROVIDERS_DOCKER_CONSTRAINTS: Label(`com.docker.compose.project`,`${BUZZ_TEST_PROJECT}`)
+      TRAEFIK_CERTIFICATESRESOLVERS_LETSENCRYPT_ACME_CASERVER: https://127.0.0.1:9/directory
+    ports: !reset []
+
+  server:
+    image: ${BUZZ_SERVER_IMAGE:?Set BUZZ_SERVER_IMAGE}
+
+  client:
+    image: curlimages/curl:8.16.0
+    profiles: [client]
+    volumes:
+      - ./site:/site:ro
+
+networks:
+  default:
+    internal: ${BUZZ_TEST_OFFLINE:-true}
+
+volumes:
+  buzz-data:
+    name: ${BUZZ_TEST_PROJECT:?Set BUZZ_TEST_PROJECT}-data
+  traefik-certs:
+    name: ${BUZZ_TEST_PROJECT}-certs
+  traefik-dynamic:
+    name: ${BUZZ_TEST_PROJECT}-dynamic

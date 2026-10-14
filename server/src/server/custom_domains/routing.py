@@ -1,26 +1,21 @@
 from __future__ import annotations
 
-import json
 import logging
 from collections.abc import Callable
 
 from .claims import DomainClaim, DomainClaimStore
-from .traefik import TraefikRuntimeClient
+from .traefik import TraefikFileControl
 
 logger = logging.getLogger(__name__)
 
 
-def build_traefik_snapshot(
-    connect: Callable,
+def custom_domain_routers(
+    claims: list[DomainClaim],
     https_entrypoint: str,
     service: str,
     cert_resolver: str,
-) -> bytes:
-    with connect() as conn:
-        claims = DomainClaimStore(conn).routable_claims()
-    if not claims:
-        return b"{}\n"
-    routers = {
+) -> dict[str, dict]:
+    return {
         claim.route_name: {
             "entryPoints": [https_entrypoint],
             "rule": f"Host(`{claim.hostname}`)",
@@ -29,90 +24,80 @@ def build_traefik_snapshot(
         }
         for claim in claims
     }
-    return json.dumps(
-        {"http": {"routers": routers}},
-        separators=(",", ":"),
-        sort_keys=True,
-    ).encode() + b"\n"
 
 
 class DomainRouteReconciler:
+    """Writes routable claims to Traefik's dynamic file, then acknowledges
+    publication and withdrawal only once Traefik serves exactly that file."""
+
     def __init__(
         self,
-        runtime_client: TraefikRuntimeClient,
+        control: TraefikFileControl,
         https_entrypoint: str,
         service: str,
         cert_resolver: str,
         routing_enabled: Callable[[], bool],
-        withdrawal_snapshot_acknowledged: Callable[[str, str], bool],
         connect: Callable,
     ):
-        self._runtime_client = runtime_client
+        self._control = control
         self._https_entrypoint = https_entrypoint
         self._service = service
         self._cert_resolver = cert_resolver
         self._routing_enabled = routing_enabled
-        self._withdrawal_snapshot_acknowledged = withdrawal_snapshot_acknowledged
         self._connect = connect
 
     def run_once(self) -> None:
         with self._connect() as conn:
-            claims = DomainClaimStore(conn).prepare_routes(self._routing_enabled())
+            store = DomainClaimStore(conn)
+            claims = store.prepare_routes(self._routing_enabled())
+            routable = store.routable_claims()
+        try:
+            self._control.publish(
+                custom_domain_routers(
+                    routable,
+                    self._https_entrypoint,
+                    self._service,
+                    self._cert_resolver,
+                )
+            )
+        except Exception:
+            logger.exception("Could not write Traefik dynamic configuration")
+        self._control.refresh()
+        loaded = self._control.loaded_routers()
         for claim in claims:
             try:
                 if claim.route_status == "publishing":
-                    self._reconcile_publication(claim)
+                    self._reconcile_publication(claim, loaded)
                 elif claim.route_status == "removing":
-                    self._reconcile_withdrawal(claim)
+                    self._reconcile_withdrawal(claim, loaded)
             except Exception:
                 logger.exception("Custom domain router %s reconciliation failed", claim.route_name)
 
-    def _reconcile_publication(self, claim: DomainClaim) -> None:
-        try:
-            router = self._runtime_client.router(claim.route_name)
-        except (OSError, ValueError):
-            self._record_error(claim, "runtime_api_unavailable")
+    def _reconcile_publication(
+        self, claim: DomainClaim, loaded: frozenset[str] | None
+    ) -> None:
+        if loaded is None:
+            self._record_error(claim, "routing_config_not_loaded")
             return
-        if router is None:
+        if claim.route_name not in loaded:
             self._record_error(claim, "router_not_observed")
-            return
-        if not self.matches_expected_router(claim, router):
-            self._record_error(claim, "router_configuration_mismatch")
             return
         with self._connect() as conn:
             DomainClaimStore(conn).mark_routed(claim.id, claim.route_generation)
         logger.info("Custom domain router %s acknowledged", claim.route_name)
 
-    def _reconcile_withdrawal(self, claim: DomainClaim) -> None:
-        withdrawal_started_at = claim.removal_requested_at or claim.route_updated_at
-        if not withdrawal_started_at or not self._withdrawal_snapshot_acknowledged(
-            claim.route_name, withdrawal_started_at
-        ):
-            self._record_error(claim, "withdrawal_snapshot_not_acknowledged")
+    def _reconcile_withdrawal(
+        self, claim: DomainClaim, loaded: frozenset[str] | None
+    ) -> None:
+        if loaded is None:
+            self._record_error(claim, "routing_config_not_loaded")
             return
-        try:
-            router = self._runtime_client.router(claim.route_name)
-        except (OSError, ValueError):
-            self._record_error(claim, "runtime_api_unavailable")
-            return
-        if router is not None:
+        if claim.route_name in loaded:
             self._record_error(claim, "router_still_present")
             return
         with self._connect() as conn:
             DomainClaimStore(conn).finish_withdrawal(claim.id, claim.route_generation)
         logger.info("Custom domain router %s withdrawal acknowledged", claim.route_name)
-
-    def matches_expected_router(self, claim: DomainClaim, router: dict) -> bool:
-        tls = router.get("tls")
-        return (
-            isinstance(tls, dict)
-            and router.get("status") == "enabled"
-            and router.get("errors") in (None, [])
-            and router.get("rule") == f"Host(`{claim.hostname}`)"
-            and router.get("service") == self._service
-            and router.get("entryPoints") == [self._https_entrypoint]
-            and tls.get("certResolver") == self._cert_resolver
-        )
 
     def _record_error(self, claim: DomainClaim, error: str) -> None:
         with self._connect() as conn:

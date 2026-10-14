@@ -4,11 +4,13 @@ on:
   pull_request:
     paths:
       - "server/**"
+      - ".github/workflows/server.yml"
   push:
     branches:
       - main
     paths:
       - "server/**"
+      - ".github/workflows/server.yml"
 
 jobs:
   docker-smoke:
@@ -26,19 +28,30 @@ jobs:
           cache-from: type=gha,scope=server-linux-amd64
           cache-to: type=gha,mode=max,scope=server-linux-amd64
 
-      - name: Boot the image and check /health
+      - name: Boot the image offline and wait for healthy
         run: |
           docker run -d --name buzz \
+            --network none \
+            --health-interval 2s \
             -e BUZZ_DOMAIN=buzz.localhost \
             -e GITHUB_CLIENT_ID=dummy \
             -e GITHUB_CLIENT_SECRET=dummy \
             -e BUZZ_DATA_DIR=/data \
-            -p 8080:8080 \
             buzz-server:smoke
-          if ! curl --fail --silent --show-error \
-            --retry 15 --retry-delay 2 --retry-all-errors \
-            --header "Host: buzz.localhost" \
-            http://localhost:8080/health; then
-            docker logs buzz
-            exit 1
-          fi
+          for _ in $(seq 1 30); do
+            status=$(docker inspect --format '{{.State.Health.Status}}' buzz)
+            if [ "$status" = "healthy" ]; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker inspect --format '{{json .State}}' buzz
+          docker logs buzz
+          exit 1
+
+      - name: Upgrade the standalone Compose stack from the latest release
+        env:
+          BUZZ_FROM_IMAGE: ghcr.io/infomiho/buzzstatic:latest
+          BUZZ_TO_IMAGE: buzz-server:smoke
+          BUZZ_TEST_OFFLINE: "false"
+        run: server/tests/compose/boot-test.sh

@@ -22,11 +22,14 @@ Set these variables before creating public DNS records or starting the deploymen
 
 ## Protect Credentials
 
-- Store `GITHUB_CLIENT_SECRET`, `BUZZ_ANALYTICS_SECRET`, and Cloudflare API tokens outside source control.
+- Store `GITHUB_CLIENT_SECRET`, `BUZZ_ANALYTICS_SECRET`, `BUZZ_CLOUDFLARE_DNS_API_TOKEN`, and `BUZZ_CUSTOM_DOMAIN_OPERATOR_TOKEN` outside source control.
+- Scope the Cloudflare token to the zone of `BUZZ_DOMAIN` with only Zone:Read and DNS:Edit. It can still edit every record in that zone.
 - Restrict secret-file and deployment-console access to operators.
 - Use site-scoped deployment tokens for automation instead of a user session.
 - Revoke a deployment token when its workflow no longer needs access.
 - Rotate any secret that appears in logs or source control.
+
+The wildcard certificate's private key is stored in `/data/tls` and in `buzz-certificate.yaml` in Traefik's dynamic configuration directory, the same trust domain as Traefik's own ACME storage. On Coolify, users who can manage the server can read it under **Servers > Proxy > Dynamic Configurations**. Other team members see only the file name.
 
 Buzz stores hashes of session and deployment tokens in SQLite, not their raw values. Sessions expire after 30 days. Deployment tokens currently have no expiry when created through the supported flow, so revocation is an operator responsibility.
 
@@ -42,6 +45,8 @@ Sites use separate subdomains, and the dashboard session cookie is host-only, `H
 
 - Expose the Buzz container through HTTPS rather than publishing port `8080` directly.
 - Keep the Docker socket mount read-only and limit host access. Traefik still receives broad Docker metadata access through that socket.
+- Buzz can write to Traefik's dynamic configuration directory, which every application behind the same proxy shares. A compromised Buzz container could add routes or certificates for other hostnames on that proxy.
+- Don't route the private port `8081` or Traefik's API through the proxy.
 - Set [deployment limits](../configure-deployment-limits/) appropriate for the host.
 - Monitor free disk space. Buzz has per-deployment limits, but no total storage quota, per-user quota, or maximum site count.
 - Back up `/data` and test restoration using [Manage Data And Backups](../manage-data-and-backups/).

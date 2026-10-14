@@ -12,6 +12,8 @@ dependencies = [
     "idna>=3.11",
     "webauthn>=3.0.0",
     "httpx-oauth>=0.17",
+    "cryptography>=46",
+    "acme>=5.1,<6",
 ]
 
 [project.scripts]

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import logging
 import os
+import re
 
 import uvicorn
 
@@ -10,6 +12,25 @@ from .app import create_app
 from .db import Database
 from .environment import environment_value
 from .settings import Settings
+
+BARE_HOSTNAME = re.compile(
+    r"(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*",
+    re.IGNORECASE,
+)
+
+
+def domain_error(domain: str | None) -> str | None:
+    if not domain:
+        return (
+            "BUZZ_DOMAIN is not set. Set it to the hostname that serves the dashboard, "
+            "such as buzz.example.com, or run with --dev for local development."
+        )
+    if not BARE_HOSTNAME.fullmatch(domain):
+        return (
+            f"BUZZ_DOMAIN={domain!r} is not a bare hostname. Use a value such as "
+            "buzz.example.com, without a scheme, port, path, or trailing dot."
+        )
+    return None
 
 
 def access_control_warning(
@@ -21,6 +42,18 @@ def access_control_warning(
         "WARNING: BUZZ_ALLOW_REGISTRATION is false, BUZZ_ALLOWED_GITHUB_USERS is empty, "
         "and no users exist. Nobody can log in to this server."
     )
+
+
+def configure_logging() -> None:
+    """Uvicorn configures only its own loggers. Without this, Buzz's INFO lines,
+    such as a certificate issuance, would never reach the container log."""
+    logger = logging.getLogger("server")
+    if logger.handlers:
+        return
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(levelname)s: %(name)s: %(message)s"))
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
 
 
 def main() -> None:
@@ -40,7 +73,12 @@ def main() -> None:
         overrides["dev_mode"] = True
     if overrides:
         settings = dataclasses.replace(settings, **overrides)
+    if not settings.dev_mode:
+        error = domain_error(settings.domain)
+        if error:
+            raise SystemExit(f"ERROR: {error}")
 
+    configure_logging()
     settings.sites_dir.mkdir(parents=True, exist_ok=True)
     database = Database(settings.db_path)
     database.init()

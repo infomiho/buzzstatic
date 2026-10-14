@@ -8,8 +8,38 @@ class ErrorResponse(BaseModel):
     detail: str
 
 
+class CertificateHealthResponse(BaseModel):
+    ok: bool
+    reason: Literal["proxy_unreachable", "certificate_invalid", "certificate_expiring"] | None
+    detail: str | None
+    expires_at: datetime | None
+    checked_at: datetime
+
+
 class HealthResponse(BaseModel):
-    status: Literal["ok"]
+    status: Literal["ok", "degraded"] = Field(
+        description="`degraded` reports a problem that does not stop Buzz from serving.",
+    )
+    wildcard_certificate: CertificateHealthResponse | None = Field(
+        default=None,
+        description="Latest check of the certificate the proxy serves for site subdomains.",
+    )
+    wildcard_certificate_error: Literal[
+        "not_configured", "issuance_failed", "storage_failed", "publish_failed", "check_failed"
+    ] | None = Field(
+        default=None,
+        description=(
+            "Why Buzz cannot obtain, save or publish that certificate. The server log has the "
+            "detail. Buzz retries after 2, 5, 15 and 30 minutes, then every 30 minutes."
+        ),
+    )
+    custom_domains_error: Literal["routers_unmanaged"] | None = Field(
+        default=None,
+        description=(
+            "Custom-domain routers exist but `BUZZ_TRAEFIK_DYNAMIC_DIR` is unset, so Buzz "
+            "serves no custom domain until it is set. The server log has the detail."
+        ),
+    )
 
 
 class VersionResponse(BaseModel):

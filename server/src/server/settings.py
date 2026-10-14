@@ -27,11 +27,10 @@ class Settings:
     analytics_secret: str
     allow_registration: bool
     allowed_github_users: frozenset[str] | None
+    traefik_dynamic_dir: Path | None
+    cloudflare_dns_api_token: str | None
+    acme_directory_url: str
     custom_domains_enabled: bool
-    traefik_control_token: str | None
-    traefik_control_port: int
-    traefik_api_url: str | None
-    traefik_api_authorization: str | None
     traefik_https_entrypoint: str
     traefik_service: str
     traefik_cert_resolver: str
@@ -81,11 +80,10 @@ class Settings:
             analytics_secret=analytics_secret,
             allow_registration=environment_value("BUZZ_ALLOW_REGISTRATION"),
             allowed_github_users=environment_value("BUZZ_ALLOWED_GITHUB_USERS"),
+            traefik_dynamic_dir=environment_value("BUZZ_TRAEFIK_DYNAMIC_DIR"),
+            cloudflare_dns_api_token=environment_value("BUZZ_CLOUDFLARE_DNS_API_TOKEN"),
+            acme_directory_url=environment_value("BUZZ_ACME_DIRECTORY_URL"),
             custom_domains_enabled=environment_value("BUZZ_CUSTOM_DOMAINS_ENABLED"),
-            traefik_control_token=environment_value("BUZZ_TRAEFIK_CONTROL_TOKEN"),
-            traefik_control_port=environment_value("BUZZ_TRAEFIK_CONTROL_PORT"),
-            traefik_api_url=environment_value("BUZZ_TRAEFIK_API_URL"),
-            traefik_api_authorization=environment_value("BUZZ_TRAEFIK_API_AUTHORIZATION"),
             traefik_https_entrypoint=environment_value("BUZZ_TRAEFIK_HTTPS_ENTRYPOINT"),
             traefik_service=environment_value("BUZZ_TRAEFIK_SERVICE"),
             traefik_cert_resolver=environment_value("BUZZ_TRAEFIK_CERT_RESOLVER"),

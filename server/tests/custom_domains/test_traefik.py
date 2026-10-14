@@ -1,427 +1,395 @@
 import json
+import socket
+import ssl
 import threading
 from datetime import datetime, timedelta, timezone
-from urllib.error import HTTPError
-from urllib.request import Request, urlopen
 
 import pytest
+import yaml
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.x509.oid import NameOID
 from fastapi.testclient import TestClient
 
 from server.custom_domains.traefik import (
-    EMPTY_SNAPSHOT,
-    TraefikControlServer,
-    TraefikRuntimeClient,
+    REVISION_HEADER,
+    REVISION_HOST,
+    REVISION_ROUTER,
+    TraefikFileControl,
+    dynamic_config,
+    probe_config_revision,
+    revision_max_age,
 )
+from server.traefik_file_provider import DynamicConfigError, TraefikDynamicFile
+
+ROUTER = {
+    "entryPoints": ["https"],
+    "rule": "Host(`www.example.com`)",
+    "service": "buzz@docker",
+    "tls": {"certResolver": "letsencrypt"},
+}
 
 
-class FakeResponse:
-    def __init__(self, payload):
-        self._body = json.dumps(payload).encode()
+class FakeProbe:
+    def __init__(self):
+        self.revision = None
+        self.error = None
 
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, traceback):
-        return None
-
-    def read(self, size):
-        return self._body
+    def __call__(self, origin_host):
+        if self.error:
+            raise self.error
+        return self.revision
 
 
-def request(server, path, token="secret", method="GET"):
-    return urlopen(
-        Request(
-            f"http://127.0.0.1:{server.port}{path}",
-            headers={"Authorization": f"Bearer {token}"},
-            method=method,
+def make_control(tmp_path, probe=None):
+    return TraefikFileControl(
+        TraefikDynamicFile(tmp_path, "buzz-routes"),
+        "coolify-proxy",
+        "https",
+        "buzz@docker",
+        probe=probe or FakeProbe(),
+    )
+
+
+def written(tmp_path):
+    return yaml.safe_load((tmp_path / "buzz-routes.yaml").read_text())
+
+
+def served_revision(tmp_path):
+    middleware = written(tmp_path)["http"]["middlewares"][REVISION_ROUTER]
+    return middleware["headers"]["customResponseHeaders"][REVISION_HEADER]
+
+
+def test_publish_writes_routers_and_revision_router(tmp_path):
+    control = make_control(tmp_path)
+
+    control.publish({"buzz-domain-1-g1": ROUTER})
+
+    routers = written(tmp_path)["http"]["routers"]
+    assert routers["buzz-domain-1-g1"] == ROUTER
+    assert routers[REVISION_ROUTER] == {
+        "entryPoints": ["https"],
+        "middlewares": [REVISION_ROUTER],
+        "rule": f"Host(`{REVISION_HOST}`)",
+        "service": "buzz@docker",
+        "tls": {},
+    }
+
+
+def test_dynamic_config_omits_empty_sections():
+    assert dynamic_config({}) == {}
+
+
+@pytest.mark.parametrize("name", [REVISION_ROUTER, "Upper", "bad name", "x" * 200])
+def test_publish_rejects_unsafe_router_names(tmp_path, name):
+    with pytest.raises(DynamicConfigError):
+        make_control(tmp_path).publish({name: ROUTER})
+    assert not (tmp_path / "buzz-routes.yaml").exists()
+
+
+def test_revision_follows_content(tmp_path):
+    control = make_control(tmp_path)
+    control.publish({})
+    empty = served_revision(tmp_path)
+    control.publish({"buzz-domain-1-g1": ROUTER})
+    with_router = served_revision(tmp_path)
+    control.publish({})
+
+    assert empty != with_router
+    assert served_revision(tmp_path) == empty
+
+
+def test_routers_count_as_loaded_only_when_traefik_serves_latest_revision(tmp_path):
+    probe = FakeProbe()
+    control = make_control(tmp_path, probe)
+    control.publish({"buzz-domain-1-g1": ROUTER})
+    previous = served_revision(tmp_path)
+    control.publish({})
+
+    probe.revision = previous
+    control.refresh()
+    assert control.loaded_routers() is None
+    assert control.is_ready() is False
+
+    probe.revision = served_revision(tmp_path)
+    control.refresh()
+    assert control.loaded_routers() == frozenset()
+    assert control.is_ready() is True
+
+
+def test_unreachable_proxy_is_not_loaded(tmp_path):
+    probe = FakeProbe()
+    control = make_control(tmp_path, probe)
+    control.publish({"buzz-domain-1-g1": ROUTER})
+    probe.revision = served_revision(tmp_path)
+    control.refresh()
+    probe.error = ConnectionRefusedError()
+
+    control.refresh()
+
+    assert control.loaded_routers() is None
+
+
+def test_readiness_expires_without_fresh_load(tmp_path, monkeypatch):
+    probe = FakeProbe()
+    control = make_control(tmp_path, probe)
+    control.publish({})
+    probe.revision = served_revision(tmp_path)
+    control.refresh()
+    later = datetime.now(timezone.utc) + timedelta(minutes=1)
+    monkeypatch.setattr(
+        "server.custom_domains.traefik.datetime",
+        type("Clock", (), {"now": staticmethod(lambda tz=None: later)}),
+    )
+
+    assert control.is_ready() is False
+
+
+def test_write_failure_makes_control_unready(tmp_path):
+    probe = FakeProbe()
+    control = make_control(tmp_path, probe)
+    control.publish({})
+    probe.revision = served_revision(tmp_path)
+    control.refresh()
+    (tmp_path / "buzz-routes.yaml").unlink()
+    tmp_path.chmod(0o500)
+    try:
+        with pytest.raises(DynamicConfigError):
+            control.publish({"buzz-domain-1-g1": ROUTER})
+    finally:
+        tmp_path.chmod(0o700)
+    control.refresh()
+
+    assert control.is_ready() is False
+    assert control.loaded_routers() == frozenset()
+
+
+@pytest.fixture
+def tls_server(tmp_path):
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "TRAEFIK DEFAULT CERT")])
+    now = datetime.now(timezone.utc)
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(1)
+        .not_valid_before(now - timedelta(days=1))
+        .not_valid_after(now + timedelta(days=1))
+        .sign(key, hashes.SHA256())
+    )
+    (tmp_path / "cert.pem").write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
+    (tmp_path / "key.pem").write_bytes(
+        key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
         )
     )
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(tmp_path / "cert.pem", tmp_path / "key.pem")
+    listener = socket.create_server(("127.0.0.1", 0))
+    server_names = []
+    requests = []
+    context.sni_callback = lambda _tls, server_name, _context: server_names.append(server_name)
 
-
-def test_control_server_serves_authenticated_empty_snapshot():
-    server = TraefikControlServer("secret", 0, None, host="127.0.0.1")
-    server.start()
-    try:
-        with request(server, "/traefik") as response:
-            assert response.read() == EMPTY_SNAPSHOT
-            assert response.headers["Cache-Control"] == "no-store"
-    finally:
-        server.stop()
-
-
-def test_control_server_rejects_missing_or_wrong_token():
-    server = TraefikControlServer("secret", 0, None, host="127.0.0.1")
-    server.start()
-    try:
-        for token in (None, "wrong"):
-            headers = {} if token is None else {"Authorization": f"Bearer {token}"}
-            req = Request(f"http://127.0.0.1:{server.port}/traefik", headers=headers)
-            try:
-                urlopen(req)
-                raise AssertionError("request unexpectedly succeeded")
-            except HTTPError as error:
-                assert error.code == 401
-    finally:
-        server.stop()
-
-
-def test_operator_transition_endpoint_uses_dedicated_token():
-    handoffs = [{"claim_id": 7, "hostname": "www.example.com"}]
-    server = TraefikControlServer(
-        "traefik-secret",
-        0,
-        None,
-        operator_token="old-operator-secret, operator-secret",
-        handoff_provider=lambda: handoffs,
-        host="127.0.0.1",
-    )
-    server.start()
-    try:
-        with request(
-            server, "/operator/domain-transitions?source=test", "operator-secret"
-        ) as response:
-            assert json.loads(response.read()) == {"transitions": handoffs}
-            assert response.headers["Cache-Control"] == "no-store"
-        with pytest.raises(HTTPError) as error:
-            request(server, "/operator/domain-transitions", "traefik-secret")
-        assert error.value.code == 401
-    finally:
-        server.stop()
-
-
-def test_operator_routes_authenticate_before_route_and_method_handling():
-    server = TraefikControlServer(
-        "traefik-secret",
-        0,
-        None,
-        operator_token="operator-secret",
-        handoff_provider=lambda: [],
-        host="127.0.0.1",
-    )
-    server.start()
-    try:
-        with pytest.raises(HTTPError) as missing:
-            request(server, "/operator/missing", "wrong")
-        assert missing.value.code == 401
-        assert missing.value.headers["WWW-Authenticate"] == "Bearer"
-        assert missing.value.headers["Cache-Control"] == "no-store"
-        assert json.loads(missing.value.read()) == {"detail": "Unauthorized"}
-        with pytest.raises(HTTPError) as method:
-            request(server, "/operator/domain-transitions", "wrong", "POST")
-        assert method.value.code == 401
-        assert method.value.headers["WWW-Authenticate"] == "Bearer"
-        with pytest.raises(HTTPError) as authorized_method:
-            request(server, "/operator/domain-transitions", "operator-secret", "POST")
-        assert authorized_method.value.code == 405
-        assert authorized_method.value.headers["Allow"] == "GET"
-        assert authorized_method.value.headers["Cache-Control"] == "no-store"
-        with pytest.raises(HTTPError) as cancel_method:
-            request(
-                server,
-                "/operator/domain-transitions/7/cancel",
-                "wrong",
-                "PUT",
+    def serve():
+        connection, _ = listener.accept()
+        with context.wrap_socket(connection, server_side=True) as tls:
+            requests.append(tls.recv(4096).decode())
+            tls.sendall(
+                b"HTTP/1.1 421 Misdirected Request\r\n"
+                + f"{REVISION_HEADER}: abc123\r\n".encode()
+                + b"Content-Length: 0\r\n\r\n"
             )
-        assert cancel_method.value.code == 401
-    finally:
-        server.stop()
+
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    yield listener.getsockname()[1], server_names, requests
+    listener.close()
 
 
-def test_operator_provider_failure_is_no_store_json():
-    def fail():
-        raise RuntimeError("provider failed")
-
-    server = TraefikControlServer(
-        "traefik-secret",
-        0,
-        None,
-        operator_token="operator-secret",
-        handoff_provider=fail,
-        host="127.0.0.1",
+def test_probe_reads_revision_through_tls_with_revision_sni(tls_server, monkeypatch):
+    port, server_names, requests = tls_server
+    real_create_connection = socket.create_connection
+    monkeypatch.setattr(
+        "server.custom_domains.traefik.socket.create_connection",
+        lambda address, timeout: real_create_connection(("127.0.0.1", port), timeout),
     )
-    server.start()
-    try:
-        with pytest.raises(HTTPError) as error:
-            request(server, "/operator/domain-transitions", "operator-secret")
-        assert error.value.code == 500
-        assert error.value.headers["Content-Type"] == "application/json"
-        assert error.value.headers["Cache-Control"] == "no-store"
-        assert json.loads(error.value.read())["detail"] == "Could not read transitions"
-    finally:
-        server.stop()
+
+    assert probe_config_revision("coolify-proxy") == "abc123"
+    [raw_request] = requests
+    assert server_names == [REVISION_HOST]
+    assert raw_request.startswith("HEAD / HTTP/1.1\r\n")
+    assert f"Host: {REVISION_HOST}\r\n" in raw_request
 
 
-def test_operator_transition_cancellation_maps_results_and_errors():
-    actions = []
-
-    def cancel(claim_id):
-        actions.append(claim_id)
-        if claim_id == 8:
-            from server.custom_domains.errors import ClaimConflict
-
-            raise ClaimConflict("Transition changed")
-        if claim_id == 9:
-            from server.custom_domains.errors import ClaimNotFound
-
-            raise ClaimNotFound("Custom domain claim not found")
-        return {"claim_id": claim_id, "state": "cancelled"}
-
-    server = TraefikControlServer(
-        "traefik-secret",
-        0,
-        None,
-        operator_token="operator-secret",
-        handoff_provider=lambda: [],
-        cancel_provider=cancel,
-        host="127.0.0.1",
-    )
-    server.start()
-    try:
-        with request(
-            server,
-            "/operator/domain-transitions/7/cancel",
-            "operator-secret",
-            "POST",
-        ) as response:
-            assert response.status == 200
-            assert json.load(response) == {"claim_id": 7, "state": "cancelled"}
-        for claim_id, status in ((8, 409), (9, 404)):
-            with pytest.raises(HTTPError) as error:
-                request(
-                    server,
-                    f"/operator/domain-transitions/{claim_id}/cancel",
-                    "operator-secret",
-                    "POST",
-                )
-            assert error.value.code == status
-            assert json.loads(error.value.read())["detail"]
-            error.value.close()
-        with pytest.raises(HTTPError) as error:
-            request(
-                server,
-                "/operator/domain-transitions/7/cancel",
-                "traefik-secret",
-                "POST",
-            )
-        assert error.value.code == 401
-        assert actions == [7, 8, 9]
-    finally:
-        server.stop()
-
-
-def test_control_server_rejects_malformed_snapshot_without_recording_poll():
-    server = TraefikControlServer(
-        "secret",
-        0,
-        None,
-        snapshot_provider=lambda: b"not-json",
-        host="127.0.0.1",
-    )
-    server.start()
-    try:
-        with pytest.raises(HTTPError) as error:
-            request(server, "/traefik")
-        assert error.value.code == 500
-        assert not server.is_ready()
-    finally:
-        server.stop()
-
-
-def test_readiness_reports_provider_poll_and_runtime_dependencies():
-    def open_url(request, timeout):
-        assert request.headers["Authorization"] == "Bearer runtime-secret"
-        if request.full_url.endswith("/entrypoints"):
-            return FakeResponse([{"name": "http"}, {"name": "https"}])
-        assert request.full_url.endswith("/http/services/buzz@docker")
-        return FakeResponse({"status": "enabled"})
-
-    runtime_client = TraefikRuntimeClient(
-        "http://traefik:8082/api",
-        "Bearer runtime-secret",
-        "https",
-        "buzz@docker",
-        open_url=open_url,
-    )
-    server = TraefikControlServer("secret", 0, runtime_client, host="127.0.0.1")
-    server.start()
-    try:
-        with request(server, "/traefik"):
-            pass
-        server.refresh_readiness()
-        with request(server, "/ready") as response:
-            payload = json.load(response)
-        assert payload["status"] == "ready"
-        assert all(check["ok"] for check in payload["checks"].values())
-    finally:
-        server.stop()
-
-
-def test_readiness_is_independent_from_public_health():
-    server = TraefikControlServer("secret", 0, None, host="127.0.0.1")
-    server.start()
-    try:
-        with request(server, "/ready") as response:
-            payload = json.load(response)
-        assert payload["status"] == "not_ready"
-        assert payload["checks"]["runtime_api"]["reason"] == "not_configured"
-    finally:
-        server.stop()
-
-
-def test_withdrawal_requires_a_post_request_snapshot():
-    server = TraefikControlServer("secret", 0, None, host="127.0.0.1")
-    server.start()
-    try:
-        requested_at = datetime.now(timezone.utc).isoformat()
-        with request(server, "/traefik") as response:
-            assert response.read() == EMPTY_SNAPSHOT
-        assert server.withdrawal_snapshot_acknowledged("buzz-domain-1-g1", requested_at)
-    finally:
-        server.stop()
-
-
-def test_readiness_rejects_stale_provider_poll(monkeypatch):
-    runtime_client = TraefikRuntimeClient(
-        "http://traefik:8082/api",
-        None,
-        "https",
-        "buzz@docker",
-        open_url=lambda request, timeout: FakeResponse(
-            [{"name": "https"}]
-            if request.full_url.endswith("/entrypoints")
-            else {"status": "enabled"}
-        ),
-    )
-    server = TraefikControlServer("secret", 0, runtime_client, host="127.0.0.1")
-    server.start()
-    try:
-        with request(server, "/traefik"):
-            pass
-        server.refresh_readiness()
-        monkeypatch.setattr(
-            "server.custom_domains.traefik.PROVIDER_POLL_MAX_AGE", timedelta(seconds=-1)
+def insert_routed_claim(database, **columns):
+    values = {
+        "hostname": "www.example.com",
+        "site_name": "my-site",
+        "verification_token": "bdv_test",
+        "status": "verified",
+        "created_at": "2026-07-16T00:00:00+00:00",
+        "expires_at": "2099-07-17T00:00:00+00:00",
+        "route_status": "routed",
+        "route_generation": 1,
+        **columns,
+    }
+    with database.connect() as conn:
+        conn.execute("INSERT OR IGNORE INTO sites (name) VALUES ('my-site')")
+        conn.execute(
+            f"""INSERT INTO custom_domain_claims ({", ".join(values)})
+            VALUES ({", ".join("?" for _ in values)})""",
+            tuple(values.values()),
         )
-        assert not server.is_ready()
-    finally:
-        server.stop()
 
 
-def test_readiness_rejects_service_runtime_errors():
-    runtime_client = TraefikRuntimeClient(
-        "http://traefik:8082/api",
-        None,
-        "https",
-        "buzz@docker",
-        open_url=lambda request, timeout: FakeResponse(
-            [{"name": "https"}]
-            if request.full_url.endswith("/entrypoints")
-            else {"status": "enabled", "errors": ["unavailable"]}
-        ),
-    )
-    server = TraefikControlServer("secret", 0, runtime_client, host="127.0.0.1")
-    server.start()
-    try:
-        with request(server, "/traefik"):
-            pass
-        server.refresh_readiness()
-        assert not server.is_ready()
-    finally:
-        server.stop()
+def route_status(database, hostname="www.example.com"):
+    with database.connect() as conn:
+        row = conn.execute(
+            "SELECT route_status FROM custom_domain_claims WHERE hostname = ?", (hostname,)
+        ).fetchone()
+    return row["route_status"]
 
 
-def test_router_absence_requires_successful_runtime_collection_query():
-    def open_url(request, timeout):
-        raise HTTPError(request.full_url, 404, "Not Found", None, None)
-
-    runtime_client = TraefikRuntimeClient(
-        "http://traefik:8082/api",
-        None,
-        "https",
-        "buzz@docker",
-        open_url=open_url,
-    )
-
-    with pytest.raises(HTTPError):
-        runtime_client.router("buzz-domain-1-g1")
+def wait_for(condition, attempts=300):
+    for _ in range(attempts):
+        if condition():
+            return True
+        threading.Event().wait(0.01)
+    return False
 
 
-def test_disabled_custom_domains_do_not_start_control_listener(make_app, monkeypatch):
-    class UnexpectedControlServer:
-        def __init__(self, *args, **kwargs):
-            raise AssertionError("control listener started while custom domains were disabled")
-
-    monkeypatch.setattr("server.custom_domains.runtime.TraefikControlServer", UnexpectedControlServer)
-    app = make_app(custom_domains_enabled=False, traefik_control_token="configured-but-disabled")
+def test_disabled_custom_domains_do_not_write_routing_config(make_app, tmp_path):
+    app = make_app(custom_domains_enabled=False, traefik_dynamic_dir=tmp_path)
 
     with TestClient(app) as client:
         response = client.get("/health", headers={"host": "localhost:8080"})
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    assert response.json()["status"] == "ok"
+    assert app.state.custom_domains.control is None
+    assert not (tmp_path / "buzz-routes.yaml").exists()
 
 
-def test_disabling_control_plane_is_rejected_while_routes_remain(make_app, database):
-    with database.connect() as conn:
-        conn.execute("INSERT INTO sites (name) VALUES ('my-site')")
-        conn.execute(
-            """INSERT INTO custom_domain_claims
-            (hostname, site_name, verification_token, status, created_at, expires_at,
-             route_status, route_generation)
-            VALUES ('www.example.com', 'my-site', 'bdv_test', 'verified',
-                    '2026-07-16T00:00:00+00:00', '2026-07-17T00:00:00+00:00',
-                    'routed', 1)"""
-        )
+def test_disabling_without_dynamic_dir_reports_unmanaged_routers(make_app, database, caplog):
+    insert_routed_claim(database)
 
-    with pytest.raises(RuntimeError, match="Withdraw all custom-domain routers"):
-        with TestClient(make_app(custom_domains_enabled=False)):
-            pass
+    with TestClient(make_app(custom_domains_enabled=False, traefik_dynamic_dir=None)) as client:
+        health = client.get("/health", headers={"host": "localhost:8080"}).json()
+
+    assert health["status"] == "degraded"
+    assert health["custom_domains_error"] == "routers_unmanaged"
+    assert "still route these hostnames to Buzz: www.example.com" in caplog.text
 
 
-@pytest.mark.parametrize(
-    ("control_token", "api_url"),
-    [(None, "http://traefik:8082/api"), ("secret", None)],
-)
-def test_active_cloudflare_claim_requires_complete_runtime(
-    make_app, database, control_token, api_url
+def test_disabling_withdraws_routers_and_then_reports_disabled(
+    make_app, database, tmp_path, monkeypatch
 ):
-    with database.connect() as conn:
-        conn.execute("INSERT INTO sites (name) VALUES ('my-site')")
-        conn.execute(
-            """INSERT INTO custom_domain_claims
-            (hostname, site_name, verification_token, status, created_at, expires_at,
-             route_status, route_generation, claim_mode, activated_at)
-            VALUES ('www.example.com', 'my-site', 'bdv_test', 'verified',
-                    '2026-07-16T00:00:00+00:00', '2099-07-17T00:00:00+00:00',
-                    'routed', 1, 'cloudflare', '2026-07-16T00:00:00+00:00')"""
-        )
+    insert_routed_claim(database)
+    routes_file = tmp_path / "buzz-routes.yaml"
 
+    def traefik_serves_written_revision(_host):
+        if not routes_file.exists():
+            return None
+        middleware = json.loads(routes_file.read_text())["http"]["middlewares"]
+        return middleware[REVISION_ROUTER]["headers"]["customResponseHeaders"][REVISION_HEADER]
+
+    monkeypatch.setattr(
+        "server.custom_domains.traefik.probe_config_revision", traefik_serves_written_revision
+    )
     app = make_app(
-        custom_domains_enabled=True,
-        traefik_control_token=control_token,
-        traefik_api_url=api_url,
+        custom_domains_enabled=False,
+        traefik_dynamic_dir=tmp_path,
+        custom_domain_reconcile_seconds=0.01,
     )
 
-    with pytest.raises(RuntimeError, match="complete custom-domain runtime"):
-        with TestClient(app):
-            pass
+    with TestClient(app):
+        assert wait_for(lambda: route_status(database) == "not_routed")
+        assert wait_for(lambda: not app.state.custom_domains.withdrawing)
+        capabilities = app.state.custom_domains.capabilities()
+
+    routers = json.loads(routes_file.read_text())["http"]["routers"]
+    assert set(routers) == {REVISION_ROUTER}
+    assert capabilities.status == "disabled"
+    assert capabilities.detail == "Custom domains are not enabled on this Buzz server"
 
 
-def test_enabled_custom_domains_start_and_stop_control_listener(make_app, monkeypatch):
+def test_withdrawal_waits_for_traefik_to_load_the_routes_file(
+    make_app, database, tmp_path, monkeypatch
+):
+    insert_routed_claim(database)
+    monkeypatch.setattr(
+        "server.custom_domains.traefik.probe_config_revision", lambda _host: None
+    )
+    app = make_app(
+        custom_domains_enabled=False,
+        traefik_dynamic_dir=tmp_path,
+        custom_domain_reconcile_seconds=0.01,
+    )
+
+    with TestClient(app):
+        assert wait_for(lambda: (tmp_path / "buzz-routes.yaml").exists())
+        threading.Event().wait(0.1)
+        capabilities = app.state.custom_domains.capabilities()
+
+    assert route_status(database) == "removing"
+    assert capabilities.detail == (
+        "Custom domains are disabled and their Traefik routers are being withdrawn"
+    )
+
+
+def test_active_cloudflare_claim_without_runtime_keeps_canonical_hosting(
+    make_app, database, caplog
+):
+    insert_routed_claim(
+        database, claim_mode="cloudflare", activated_at="2026-07-16T00:00:00+00:00"
+    )
+    app = make_app(custom_domains_enabled=True, traefik_dynamic_dir=None)
+
+    with TestClient(app) as client:
+        health = client.get("/health", headers={"host": "localhost:8080"}).json()
+        custom_host = client.get("/", headers={"host": "www.example.com"})
+
+    assert health["status"] == "degraded"
+    assert health["custom_domains_error"] == "routers_unmanaged"
+    assert custom_host.status_code == 421
+    assert "Set BUZZ_TRAEFIK_DYNAMIC_DIR" in caplog.text
+
+
+def test_enabled_custom_domains_publish_routing_config(make_app, tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "server.custom_domains.traefik.probe_config_revision", lambda _host: None
+    )
+    config_path = tmp_path / "buzz-routes.yaml"
+    app = make_app(
+        custom_domains_enabled=True,
+        traefik_dynamic_dir=tmp_path,
+        custom_domain_reconcile_seconds=0.01,
+    )
+
+    with TestClient(app):
+        for _ in range(200):
+            if config_path.exists():
+                break
+            threading.Event().wait(0.01)
+
+    routers = json.loads(config_path.read_text())["http"]["routers"]
+    assert set(routers) == {REVISION_ROUTER}
+
+
+@pytest.mark.parametrize(("token", "expected"), [(None, False), ("operator-secret", True)])
+def test_operator_listener_starts_only_with_operator_token(
+    make_app, tmp_path, monkeypatch, token, expected
+):
     events = []
 
-    class FakeControlServer:
-        def __init__(
-            self,
-            token,
-            port,
-            runtime_client,
-            snapshot_provider=None,
-            operator_token=None,
-            handoff_provider=None,
-        ):
-            assert token == "secret"
-            assert port == 8081
-            assert snapshot_provider is not None
+    class FakeOperatorServer:
+        def __init__(self, operator_token, port, handoff_provider, cancel_provider):
+            assert (operator_token, port) == ("operator-secret", 8081)
             events.append("created")
 
         def start(self):
@@ -430,48 +398,27 @@ def test_enabled_custom_domains_start_and_stop_control_listener(make_app, monkey
         def stop(self):
             events.append("stopped")
 
-    monkeypatch.setattr("server.custom_domains.runtime.TraefikControlServer", FakeControlServer)
+    monkeypatch.setattr("server.custom_domains.runtime.OperatorServer", FakeOperatorServer)
+    monkeypatch.setattr(
+        "server.custom_domains.traefik.probe_config_revision", lambda _host: None
+    )
     app = make_app(
         custom_domains_enabled=True,
-        traefik_control_token="secret",
-        traefik_control_port=8081,
-        traefik_api_url=None,
+        traefik_dynamic_dir=tmp_path,
+        custom_domain_operator_token=token,
     )
 
-    with TestClient(app) as client:
-        response = client.get("/health", headers={"host": "localhost:8080"})
-        assert response.status_code == 200
-        assert events == ["created", "started"]
+    with TestClient(app):
+        pass
 
-    assert events == ["created", "started", "stopped"]
+    assert events == (["created", "started", "stopped"] if expected else [])
 
 
-def test_lifespan_runs_transition_detection_before_legacy_validators(make_app, monkeypatch):
+def test_lifespan_runs_transition_detection_before_legacy_validators(
+    make_app, tmp_path, monkeypatch
+):
     events = []
     observed = threading.Event()
-
-    class Runtime:
-        def __init__(self, *args):
-            pass
-
-    class Control:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def start(self):
-            pass
-
-        def stop(self):
-            pass
-
-        def refresh_readiness(self):
-            events.append("readiness")
-
-        def withdrawal_snapshot_acknowledged(self, *_args):
-            return True
-
-        def set_operator_handlers(self, *_args):
-            events.append("operator")
 
     class Loop:
         def __init__(self, name):
@@ -482,8 +429,6 @@ def test_lifespan_runs_transition_detection_before_legacy_validators(make_app, m
             if self.name == "cloudflare":
                 observed.set()
 
-    monkeypatch.setattr("server.custom_domains.runtime.TraefikRuntimeClient", Runtime)
-    monkeypatch.setattr("server.custom_domains.runtime.TraefikControlServer", Control)
     monkeypatch.setattr("server.custom_domains.runtime.DomainRouteReconciler", lambda *a, **k: Loop("route"))
     monkeypatch.setattr("server.custom_domains.runtime.DomainActivator", lambda *a, **k: Loop("direct"))
     monkeypatch.setattr(
@@ -492,14 +437,16 @@ def test_lifespan_runs_transition_detection_before_legacy_validators(make_app, m
     monkeypatch.setattr(
         "server.custom_domains.runtime.DomainTransitionCoordinator", lambda *a, **k: Loop("transition")
     )
-    app = make_app(
-        custom_domains_enabled=True,
-        traefik_control_token="secret",
-        traefik_api_url="http://traefik/api",
-    )
+    app = make_app(custom_domains_enabled=True, traefik_dynamic_dir=tmp_path)
 
     with TestClient(app):
         assert observed.wait(2)
 
+    assert events.index("route") < events.index("transition")
     assert events.index("transition") < events.index("direct")
     assert events.index("transition") < events.index("cloudflare")
+
+
+def test_revision_acknowledgements_outlive_a_slow_reconcile_interval():
+    assert revision_max_age(5) == timedelta(seconds=30)
+    assert revision_max_age(60) == timedelta(seconds=180)

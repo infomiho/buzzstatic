@@ -37,9 +37,8 @@ def render_configuration() -> str:
     rows = []
     for variable in ENVIRONMENT_VARIABLES:
         requirement = variable.required or "Optional"
-        scope = "Buzz server" if variable.scope == "server" else "Standalone deployment"
         rows.append(
-            f"| `{variable.name}` | {variable.description} | {scope} | "
+            f"| `{variable.name}` | {variable.description} | "
             f"{display_default(variable)} | {requirement} |"
         )
 
@@ -53,20 +52,26 @@ editUrl: false
 
 Buzz reads server configuration when the Python modules are imported. Restart the server after changing an environment variable.
 
-Command-line options take precedence where noted. Values used only by the bundled Traefik deployment are marked as standalone deployment settings.
+Command-line options take precedence where noted.
 
 ## Environment Variables
 
-| Variable | Purpose | Scope | Default | Requirement |
-| --- | --- | --- | --- | --- |
+| Variable | Purpose | Default | Requirement |
+| --- | --- | --- | --- |
 """ + "\n".join(rows) + """
 
 ## CLI Environment Variables
 
 The CLI reads `BUZZ_SERVER` and `BUZZ_TOKEN`. The root `--server` and `--token` options take precedence, followed by environment variables, then saved configuration.
 
-Keep secrets outside source control. `GITHUB_CLIENT_SECRET`, `BUZZ_ANALYTICS_SECRET`, `BUZZ_TRAEFIK_CONTROL_TOKEN`, `BUZZ_CUSTOM_DOMAIN_OPERATOR_TOKEN`, `BUZZ_TRAEFIK_API_AUTHORIZATION`, `CF_API_TOKEN`, and `BUZZ_TOKEN` contain sensitive values.
+Keep secrets outside source control. """ + secret_names() + """ contain sensitive values.
 """
+
+
+def secret_names() -> str:
+    names = [f"`{variable.name}`" for variable in ENVIRONMENT_VARIABLES if variable.sensitive]
+    names.append("`BUZZ_TOKEN`")
+    return ", ".join(names[:-1]) + ", and " + names[-1]
 
 
 def render_env_example() -> str:
@@ -96,10 +101,6 @@ def render_env_example() -> str:
 
 # Optional custom domain control plane
 {setting('BUZZ_CUSTOM_DOMAINS_ENABLED', commented=True)}
-{setting('BUZZ_TRAEFIK_CONTROL_TOKEN', commented=True)}
-{setting('BUZZ_TRAEFIK_CONTROL_PORT', commented=True)}
-{setting('BUZZ_TRAEFIK_API_URL', commented=True)}
-{setting('BUZZ_TRAEFIK_API_AUTHORIZATION', commented=True)}
 {setting('BUZZ_TRAEFIK_HTTPS_ENTRYPOINT', commented=True)}
 {setting('BUZZ_TRAEFIK_SERVICE', commented=True)}
 {setting('BUZZ_CUSTOM_DOMAIN_OPERATOR_TOKEN', commented=True)}
@@ -111,10 +112,9 @@ def render_env_example() -> str:
 {setting('BUZZ_TRAEFIK_CERT_RESOLVER', commented=True)}
 {setting('BUZZ_CUSTOM_DOMAIN_RECONCILE_SECONDS', commented=True)}
 
-# Standalone Docker Compose deployment
-{setting('CF_API_TOKEN')}
-{setting('ACME_EMAIL')}
-{setting('BUZZ_CUSTOM_DOMAIN_ACME_CA_SERVER', commented=True)}
+# Wildcard certificate for BUZZ_DOMAIN and *.BUZZ_DOMAIN
+{setting('BUZZ_CLOUDFLARE_DNS_API_TOKEN')}
+{setting('BUZZ_ACME_DIRECTORY_URL', commented=True)}
 """
 
 

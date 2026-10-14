@@ -8,17 +8,27 @@ sidebar:
 import { Code } from '@astrojs/starlight/components';
 import composeFile from '../../../../../../server/docker-compose.yml?raw';
 
-Deploy Buzz with the Docker Compose file on this page. It runs the published Buzz server image and Traefik on the same host and obtains a wildcard certificate through Cloudflare DNS.
+export const serverVersion = composeFile.match(/buzzstatic:([\w.]+)/)[1];
+export const composeUrl = `https://raw.githubusercontent.com/infomiho/buzzstatic/server-v${serverVersion}/server/docker-compose.yml`;
+export const downloadCommand = `curl -fsSLo docker-compose.yml ${composeUrl}`;
 
-The Compose file pins the exact current server release, `ghcr.io/infomiho/buzzstatic:<version>`. Every release updates the pin, so this page always shows the newest version.
+Deploy Buzz with the Docker Compose file on this page. It runs the published Buzz server image and Traefik on the same host. Buzz obtains the wildcard certificate itself through the Cloudflare API and publishes it to Traefik.
+
+A deployment directory holds three files:
+
+| File | Owner | Purpose |
+| --- | --- | --- |
+| `docker-compose.yml` | Buzz release | Replaced on every update. Never edit it. |
+| `.env` | Operator | Every Buzz setting. The server reads the whole file. |
+| `compose.override.yml` | Operator | Optional local changes such as ports, labels, or Traefik settings. |
 
 ## Before You Start
 
 Complete these prerequisites:
 
-- Install Docker Engine with the Docker Compose plugin.
-- Point `buzz.example.com` and `*.buzz.example.com` at the host.
-- Allow inbound TCP traffic on port `443`. Port `80` is also required when the optional custom-domain HTTP-01 resolver is enabled; otherwise it is used only for the bundled HTTP-to-HTTPS redirect.
+- Install Docker Engine with the Docker Compose plugin, version 2.24.4 or later.
+- Host the DNS zone of `buzz.example.com` on Cloudflare and point `buzz.example.com` and `*.buzz.example.com` at the host.
+- Allow inbound TCP traffic on ports `80` and `443`.
 - Create a Cloudflare API token and a GitHub OAuth app.
 - Complete the access decision in the [Self-Hosting Overview](../overview/). Configure upstream controls before deployment if Buzz is for a closed group.
 
@@ -26,27 +36,24 @@ Follow [Configure DNS And TLS](../configure-dns-and-tls/) and [Configure GitHub 
 
 ## Configure The Deployment
 
-1. Create a directory for the deployment:
+1. Create a directory for the deployment and download the Compose file for Buzz {serverVersion}:
 
-   ```bash
-   mkdir buzz && cd buzz
-   ```
+   <Code code={`mkdir buzz && cd buzz\n${downloadCommand}`} lang="bash" />
 
-2. Save this Compose file as `docker-compose.yml`:
+   The file pins the server release and the Traefik version it was tested with:
 
    <Code code={composeFile} lang="yaml" title="docker-compose.yml" />
 
-3. Create a `.env` file next to it with at least these values:
+2. Create a `.env` file next to it:
 
    ```text
    BUZZ_DOMAIN=buzz.example.com
    GITHUB_CLIENT_ID=your-github-client-id
    GITHUB_CLIENT_SECRET=your-github-client-secret
-   CF_API_TOKEN=your-cloudflare-api-token
-   ACME_EMAIL=admin@example.com
+   BUZZ_CLOUDFLARE_DNS_API_TOKEN=your-cloudflare-api-token
    ```
 
-   Restrict access with `chmod 600 .env` and keep it out of source control. Set `ACME_EMAIL` to an address that can receive Let's Encrypt notices. The [configuration reference](../../reference/configuration/) lists every variable.
+   Restrict access with `chmod 600 .env` and keep it out of source control. Add any other setting from the [configuration reference](../../reference/configuration/) to the same file. Every key in `.env` reaches the server, and an empty value counts as unset. Compose refuses to start when `BUZZ_DOMAIN` or `BUZZ_CLOUDFLARE_DNS_API_TOKEN` is missing, and the server exits with an `ERROR:` line naming any invalid value.
 
 ## Start Buzz
 
@@ -56,16 +63,17 @@ Pull the pinned images and start the services:
 docker compose up -d
 ```
 
-The Compose project creates two named volumes:
+The Compose project creates three named volumes:
 
-- `buzz_buzz-data` stores all Buzz data at `/data`.
-- `buzz_traefik-certs` stores Traefik's ACME state.
+- `buzz_buzz-data` stores all Buzz data at `/data`, including the wildcard certificate in `/data/tls`.
+- `buzz_traefik-certs` stores Traefik's ACME state for custom domains in `acme-http.json`.
+- `buzz_traefik-dynamic` holds the certificate and routers that Buzz publishes to Traefik. Buzz rewrites it from `/data`.
 
-Do not remove either volume during routine updates.
+Do not remove `buzz_buzz-data` or `buzz_traefik-certs` during routine updates.
 
 ## Verify The Deployment
 
-1. Confirm that both containers are running:
+1. Confirm that both containers are running and the server is healthy:
 
    ```bash
    docker compose ps
@@ -77,95 +85,9 @@ Do not remove either volume during routine updates.
    curl --fail --show-error https://buzz.example.com/health
    ```
 
-   The response is:
-
-   ```json
-   {"status":"ok"}
-   ```
+   The first certificate takes up to a few minutes after the first start. Until then Traefik serves its default certificate and `/health` reports `"status":"degraded"`. The server logs `Wildcard certificate issued, valid until` once it has published the certificate, and checks it through Traefik a few seconds later. If `wildcard_certificate_error` stays set, the server logs name the cause. Buzz retries after 2, 5, 15, and 30 minutes, and `docker compose restart server` retries at once after you fix the cause.
 
 3. Open `https://buzz.example.com` and start a GitHub sign-in.
-
-## Prepare The Optional Custom Domain Control Plane
-
-Custom domains are disabled by default. Skip this section when the operator does not want Buzz to manage custom domains.
-
-### Enable The Control Plane
-
-Generate a random token:
-
-```bash
-python -c 'import secrets; print(secrets.token_urlsafe(48))'
-```
-
-Add these values to `.env`:
-
-```text
-BUZZ_CUSTOM_DOMAINS_ENABLED=true
-BUZZ_TRAEFIK_CONTROL_TOKEN=replace-with-the-generated-token
-BUZZ_MAX_CUSTOM_DOMAINS_PER_SITE=5
-BUZZ_MAX_CUSTOM_DOMAINS_PER_USER=20
-BUZZ_MAX_CUSTOM_DOMAINS_SERVER_WIDE=1000
-```
-
-The quota settings limit pending and verified aliases per site, per user, and across the server. Each alias is reconciled and removed independently; aliases awaiting acknowledged withdrawal continue to consume quota.
-
-Recreate the services:
-
-```bash
-docker compose up -d
-```
-
-The bundled Compose configuration then enables Traefik's HTTP provider, which polls the private Buzz listener on port `8081`. The port is exposed only to the Compose network. It also prepares:
-
-- The `buzz-custom` ACME resolver using HTTP-01 on entrypoint `web`.
-- A protected Traefik runtime API on the private `buzz-admin` entrypoint.
-- Runtime checks for entrypoint `websecure` and service `buzz@docker`.
-
-### Verify The Control Plane
-
-Check the private readiness response:
-
-```bash
-docker compose exec server uv run python -c 'import json,os,urllib.request; token=os.environ["BUZZ_TRAEFIK_CONTROL_TOKEN"]; request=urllib.request.Request("http://localhost:8081/ready",headers={"Authorization":f"Bearer {token}"}); print(json.dumps(json.load(urllib.request.urlopen(request)),indent=2))'
-```
-
-This stage can confirm provider polling, runtime API access, `buzz@docker`, and the HTTPS entrypoint. It cannot prove that the unused ACME resolver can issue certificates. Certificate issuance and ACME storage are exercised later with a staging hostname.
-
-### Opt Into Cloudflare Support
-
-Two flags build on the control plane, in order:
-
-| Variable | Turns on | Set it |
-| --- | --- | --- |
-| `BUZZ_CLOUDFLARE_DIAGNOSTICS_ENABLED` | Admission of credential-free Cloudflare proxy claims | First |
-| `BUZZ_CLOUDFLARE_ACTIVATION_ENABLED` | Content serving for healthy Cloudflare claims | After controlled-zone verification |
-
-Diagnostics checks persistent TXT ownership, Cloudflare addresses, edge TLS, challenge forwarding, and Full (strict) origin behavior. Bypass redirects, caching, WAF, Workers, Access, and challenges on Buzz and ACME verification paths.
-
-### Opt Into Automatic Connection-Path Detection
-
-Automatic connection-path detection defaults off. It is available only when direct routing and Cloudflare diagnostics and activation are all ready, including current Cloudflare ranges and the transition runtime. After validating existing direct and Cloudflare claims, set `BUZZ_AUTOMATIC_DOMAIN_TRANSITION_ADMISSION_ENABLED=true` to let Buzz detect and validate supported DNS path changes without replacing the domain claim. Closing admission prevents new transitions while active transitions continue to completion, cancellation, or their deadline.
-
-### Configure Operator Endpoints
-
-Set `BUZZ_CUSTOM_DOMAIN_OPERATOR_TOKEN` to one or more dedicated bearer tokens separated by commas. On the private control port `8081`:
-
-- `GET /operator/domain-transitions` reports active transitions with current generation-qualified DNS and path evidence.
-- `POST /operator/domain-transitions/{claim_id}/cancel` validates the current effective path before retaining it and returns `404` for an unknown claim or `409` when cancellation is unsafe or loses a race.
-
-Operator routes authenticate before route or method handling and return no-store JSON errors. Do not reuse `BUZZ_TRAEFIK_CONTROL_TOKEN`, expose these endpoints through the public app, or log/send the token outside the authorization header.
-
-### Exercise Staging Routing
-
-To exercise staging-only exact-host routing, add this value and recreate the services:
-
-```text
-BUZZ_CUSTOM_DOMAIN_ROUTING_ENABLED=true
-```
-
-The bundled `buzz-custom` resolver defaults to Let's Encrypt's staging directory through `BUZZ_CUSTOM_DOMAIN_ACME_CA_SERVER`. Add and TXT-verify a hostname from its site detail page, wait for router acknowledgement, then open the displayed verification URL. Only that reserved verification path is available on the custom hostname in this stage.
-
-Set `BUZZ_CUSTOM_DOMAIN_ROUTING_ENABLED=false` to withdraw staging routers. Wait for acknowledged withdrawal before disabling the custom-domain control plane. Do not change `BUZZ_CUSTOM_DOMAIN_ACME_CA_SERVER` to production until the production custom-domain stage is implemented and verified.
 
 If a container exits or TLS isn't issued, inspect the logs:
 
@@ -175,14 +97,46 @@ docker compose logs server traefik
 
 See [Troubleshoot Self-Hosting](../../troubleshooting/self-hosting/) for common causes.
 
+## Customize The Deployment
+
+Put local changes in `compose.override.yml`. Compose loads it automatically and merges it into `docker-compose.yml`, so it survives every update. For example, to publish different host ports and raise Traefik's log level:
+
+```yaml
+services:
+  traefik:
+    environment:
+      TRAEFIK_LOG_LEVEL: DEBUG
+    ports: !override
+      - "8080:80"
+      - "8443:443"
+```
+
+Traefik reads its static configuration from the `TRAEFIK_*` variables in `docker-compose.yml`. Add or change single keys under `environment`, as above. Do not set a `command` for Traefik: any command-line argument makes Traefik ignore all of these variables, so it opens no entrypoints and every site goes down.
+
+Lists such as `ports` and `labels` are appended to by default. Use `!override` to replace a list.
+
+## Enable Custom Domains
+
+Custom domains are disabled by default. To let site owners add their own hostnames, add these values to `.env`:
+
+```text
+BUZZ_CUSTOM_DOMAINS_ENABLED=true
+BUZZ_CUSTOM_DOMAIN_INGRESS_IPS=203.0.113.10
+```
+
+Set `BUZZ_CUSTOM_DOMAIN_INGRESS_IPS` to the host's public IPv4 and IPv6 addresses, separated by commas. Recreate the services with `docker compose up -d`.
+
+Buzz writes a router for each verified hostname into the shared `buzz_traefik-dynamic` volume. Traefik requests its certificate from Let's Encrypt with the HTTP-01 challenge on port `80`, through the `letsencrypt` resolver. The Compose file pins that resolver for the server, so a `BUZZ_TRAEFIK_CERT_RESOLVER` line in `.env` has no effect. [Deploy With Coolify](../coolify/#enable-custom-domains) describes the site owner flow, Cloudflare proxy domains, and the operator endpoints, which work the same way here.
+
+To disable custom domains, set `BUZZ_CUSTOM_DOMAINS_ENABLED=false` and run `docker compose up -d`. Buzz withdraws the remaining routers and logs `All custom-domain routers are withdrawn`.
+
 ## Update Or Roll Back
 
-Create a [cold backup](../manage-data-and-backups/) before an update and read the [release notes](https://github.com/infomiho/buzzstatic/releases) for the versions you skip past. Update the `image:` tag in `docker-compose.yml` to the new release, or copy the Compose file above again when the release notes mention deployment changes. Then recreate the services:
+Create a [cold backup](../manage-data-and-backups/#back-up-standalone-docker-compose) before an update and read the [release notes](https://github.com/infomiho/buzzstatic/releases) for the versions you skip past. Then replace the Compose file with the one from the new release and recreate the services. For Buzz {serverVersion}:
 
-```bash
-docker compose pull
-docker compose up -d
-```
+<Code code={`${downloadCommand}\ndocker compose pull\ndocker compose up -d`} lang="bash" />
+
+For another release, replace the version in the URL. Your `.env` and `compose.override.yml` stay untouched.
 
 Confirm the new release is serving:
 
@@ -190,7 +144,7 @@ Confirm the new release is serving:
 curl --fail --show-error https://buzz.example.com/version
 ```
 
-Database migrations run automatically when the new server starts, and the instance is unavailable while they run. Migrations are forward-only: if the newer release added one, an older image refuses to start against the migrated database and exits. To roll back, stop the stack, [restore the pre-update backup](../manage-data-and-backups/#restore-standalone-docker-compose), set the `image:` tag back to the previous release, and start the stack again.
+Database migrations run automatically when the new server starts, and the instance is unavailable while they run. Before migrating, Buzz saves the database to `/data/backups`. Migrations are forward-only: an older image refuses to start against the migrated database and names the backup to restore. To roll back, stop the stack, download the previous release's Compose file, [restore the pre-migration backup](../manage-data-and-backups/#restore-a-pre-migration-backup) or the [cold backup](../manage-data-and-backups/#restore-standalone-docker-compose), and start the stack again.
 
 ### Choose An Image Tag
 
@@ -198,8 +152,29 @@ The published image carries several tags:
 
 | Tag | Meaning | Use |
 | --- | --- | --- |
-| `<major>.<minor>.<patch>` | Exact release, immutable | Recommended. The Compose file above pins this form. |
+| `<major>.<minor>.<patch>` | Exact release, immutable | Recommended. The Compose file pins this form. |
 | `<major>.<minor>` | Latest patch release in the series | Unattended patch updates. |
 | `latest` | Latest release | Not recommended. Deployments stop being reproducible. |
 
-To automate updates, commit the deployment directory (without `.env`) to a repository you control. The tag stays inline in `docker-compose.yml`, so Renovate's docker-compose manager opens a pull request per release, including the release notes. For notification-only updates, point [Diun](https://github.com/crazy-max/diun) at the running containers. Avoid tools that auto-pull and restart running containers: an unattended update can run a database migration you did not plan for.
+To run another tag, set `image:` for the `server` service in `compose.override.yml`. The pinned Compose file then no longer decides the server version, so remove the override before the next update.
+
+For update notifications, watch releases on the [GitHub repository](https://github.com/infomiho/buzzstatic) or point [Diun](https://github.com/crazy-max/diun) at the running containers. Avoid tools that auto-pull and restart running containers: an unattended update can run a database migration you did not plan for.
+
+## Upgrade From 0.6
+
+This release moves wildcard issuance from Traefik into Buzz, configures Traefik through environment variables, and reads `.env` through `env_file`.
+
+1. Create a [cold backup](../manage-data-and-backups/#back-up-standalone-docker-compose) of both volumes, and copy `.env`, `docker-compose.yml`, and `compose.override.yml` if it exists.
+2. Move those edits into `compose.override.yml`. Traefik settings become `TRAEFIK_*` keys under `services.traefik.environment`, as in [Customize The Deployment](#customize-the-deployment). Never give Traefik a `command`.
+3. Edit `.env`:
+   - Rename `CF_API_TOKEN` to `BUZZ_CLOUDFLARE_DNS_API_TOKEN`.
+   - Delete `ACME_EMAIL`.
+   - Delete `BUZZ_TRAEFIK_CONTROL_TOKEN`, `BUZZ_CUSTOM_DOMAIN_ACME_CA_SERVER`, `BUZZ_TRAEFIK_CERT_RESOLVER`, `BUZZ_CUSTOM_DOMAIN_ROUTING_ENABLED`, `BUZZ_CUSTOM_DOMAIN_ADMISSION_ENABLED`, `BUZZ_CLOUDFLARE_DIAGNOSTICS_ENABLED`, `BUZZ_CLOUDFLARE_ACTIVATION_ENABLED`, and `BUZZ_AUTOMATIC_DOMAIN_TRANSITION_ADMISSION_ENABLED`.
+   - Review the remaining keys. Every key now reaches the server, including keys the old Compose file ignored.
+4. Download the new Compose file, pull, and restart, as in [Update Or Roll Back](#update-or-roll-back).
+
+Expect Traefik's default certificate on every Buzz hostname until Buzz issues its wildcard, usually a few minutes. Activated custom hostnames answer `421` for up to about 90 seconds after the restart while Buzz checks them again, then get new production certificates from `letsencrypt`. The old `acme.json` in `buzz_traefik-certs` is no longer read. Delete it once you no longer need to roll back.
+
+If you skip the upgrade, the old Compose file keeps working. Bumping only the image tag in the old file leaves the server container unhealthy, because the old healthcheck calls `uv`, which the image no longer ships, so replace the whole file. Leaving `CF_API_TOKEN` unrenamed makes Compose refuse to start.
+
+To roll back, copy the saved `docker-compose.yml`, `.env`, and `compose.override.yml` back and run `docker compose up -d --remove-orphans`. The old Traefik serves its wildcard from `acme.json` again at once, and data written since the upgrade is kept.

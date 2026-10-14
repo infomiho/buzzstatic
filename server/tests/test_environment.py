@@ -2,6 +2,7 @@ import pytest
 
 from server.environment import (
     ENVIRONMENT_BY_NAME,
+    InvalidEnvironment,
     ENVIRONMENT_VARIABLES,
     parse_bool,
     parse_github_logins,
@@ -29,11 +30,10 @@ def test_environment_registry_covers_server_and_deployment_settings():
         "BUZZ_MAX_ARCHIVE_PATH_BYTES",
         "BUZZ_ALLOW_REGISTRATION",
         "BUZZ_ALLOWED_GITHUB_USERS",
+        "BUZZ_TRAEFIK_DYNAMIC_DIR",
+        "BUZZ_CLOUDFLARE_DNS_API_TOKEN",
+        "BUZZ_ACME_DIRECTORY_URL",
         "BUZZ_CUSTOM_DOMAINS_ENABLED",
-        "BUZZ_TRAEFIK_CONTROL_TOKEN",
-        "BUZZ_TRAEFIK_CONTROL_PORT",
-        "BUZZ_TRAEFIK_API_URL",
-        "BUZZ_TRAEFIK_API_AUTHORIZATION",
         "BUZZ_TRAEFIK_HTTPS_ENTRYPOINT",
         "BUZZ_TRAEFIK_SERVICE",
         "BUZZ_CUSTOM_DOMAIN_OPERATOR_TOKEN",
@@ -44,21 +44,36 @@ def test_environment_registry_covers_server_and_deployment_settings():
         "BUZZ_CUSTOM_DOMAIN_ORIGIN_HOST",
         "BUZZ_TRAEFIK_CERT_RESOLVER",
         "BUZZ_CUSTOM_DOMAIN_RECONCILE_SECONDS",
-        "BUZZ_CUSTOM_DOMAIN_ACME_CA_SERVER",
-        "CF_API_TOKEN",
-        "ACME_EMAIL",
     }
 
 
-def test_numeric_setting_preserves_invalid_value_failure(monkeypatch):
-    monkeypatch.setenv("BUZZ_MAX_SITE_FILES", "not-a-number")
-    with pytest.raises(ValueError):
-        ENVIRONMENT_BY_NAME["BUZZ_MAX_SITE_FILES"].read()
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("BUZZ_MAX_SITE_FILES", "10k"),
+        ("BUZZ_ALLOW_REGISTRATION", "maybe"),
+        ("BUZZ_CUSTOM_DOMAIN_INGRESS_IPS", "10.0.0.1"),
+        ("BUZZ_CUSTOM_DOMAIN_RECONCILE_SECONDS", "0"),
+    ],
+)
+def test_invalid_value_names_the_variable(monkeypatch, name, value):
+    monkeypatch.setenv(name, value)
+    with pytest.raises(InvalidEnvironment, match=f"^Invalid {name}: "):
+        ENVIRONMENT_BY_NAME[name].read()
 
 
-def test_proxy_settings_are_not_server_settings():
-    assert ENVIRONMENT_BY_NAME["CF_API_TOKEN"].scope == "standalone"
-    assert ENVIRONMENT_BY_NAME["ACME_EMAIL"].scope == "standalone"
+def test_custom_domain_certificates_default_to_production_resolver(monkeypatch):
+    monkeypatch.delenv("BUZZ_TRAEFIK_CERT_RESOLVER", raising=False)
+    assert ENVIRONMENT_BY_NAME["BUZZ_TRAEFIK_CERT_RESOLVER"].read() == "letsencrypt"
+
+
+@pytest.mark.parametrize(
+    "name", ["BUZZ_ALLOW_REGISTRATION", "BUZZ_MAX_SITE_FILES", "BUZZ_CUSTOM_DOMAINS_ENABLED"]
+)
+def test_empty_value_reads_as_default(monkeypatch, name):
+    monkeypatch.setenv(name, "")
+    variable = ENVIRONMENT_BY_NAME[name]
+    assert variable.read() == variable.default
 
 
 @pytest.mark.parametrize("value", ["1", "true", "True", " yes ", "on"])
@@ -119,8 +134,6 @@ def test_sensitive_settings_are_marked():
     assert sensitive == {
         "GITHUB_CLIENT_SECRET",
         "BUZZ_ANALYTICS_SECRET",
-        "BUZZ_TRAEFIK_CONTROL_TOKEN",
-        "BUZZ_TRAEFIK_API_AUTHORIZATION",
         "BUZZ_CUSTOM_DOMAIN_OPERATOR_TOKEN",
-        "CF_API_TOKEN",
+        "BUZZ_CLOUDFLARE_DNS_API_TOKEN",
     }
