@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.16.0](https://github.com/infomiho/buzzstatic/compare/buzz-cli-v0.15.1...buzz-cli-v0.16.0) (2026-10-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* **server:** replace the whole Compose file and add BUZZ_CLOUDFLARE_DNS_API_TOKEN. On Coolify, reset the proxy to default after deploying and delete the old wildcard certificate. The Traefik API, control token and HTTP provider are no longer used. See the self-hosting upgrade docs.
+
+### Features
+
+* **server:** own the wildcard certificate and route custom domains through Traefik's file provider ([ae5a637](https://github.com/infomiho/buzzstatic/commit/ae5a63738be292949374e61cd4a0021e3897e142))
+
 ## [0.15.1](https://github.com/infomiho/buzzstatic/compare/buzz-cli-v0.15.0...buzz-cli-v0.15.1) (2026-09-06)
 
 
