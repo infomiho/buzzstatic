@@ -6,8 +6,9 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from ..templating import templates
 from ..auth_service import Identity
-from ..dependencies import get_device_authorization, get_identity, require_user
+from ..dependencies import get_device_authorization, get_identity, get_settings, require_user
 from ..device_authorization import DeviceAuthorizationService
+from ..settings import Settings
 
 
 router = APIRouter(include_in_schema=False)
@@ -16,6 +17,7 @@ router = APIRouter(include_in_schema=False)
 @router.get("/device", response_class=HTMLResponse)
 async def device_page(
     request: Request,
+    settings: Annotated[Settings, Depends(get_settings)],
     identity: Annotated[Identity | None, Depends(get_identity)] = None,
 ):
     # The code is deliberately not pre-filled: the approver must copy it from
@@ -25,6 +27,7 @@ async def device_page(
         return RedirectResponse(url="/?next=/device", status_code=303)
     return templates.TemplateResponse(request, "device.html", {
         "user": identity.user,
+        "server_url": settings.control_origin,
         "outcome": None,
     })
 
@@ -33,11 +36,13 @@ async def device_page(
 async def device_approve(
     request: Request,
     identity: Annotated[Identity, Depends(require_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
     device_auth: Annotated[DeviceAuthorizationService, Depends(get_device_authorization)],
     user_code: str = Form(""),
 ):
     approved = device_auth.approve(user_code, identity.user.id)
     return templates.TemplateResponse(request, "device.html", {
         "user": identity.user,
+        "server_url": settings.control_origin,
         "outcome": "approved" if approved else "invalid",
     })
