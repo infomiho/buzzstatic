@@ -40,6 +40,8 @@ describe("createProgram", () => {
       "tokens list",
       "tokens create",
       "tokens delete",
+      "server",
+      "server list",
       "login",
       "logout",
       "whoami",

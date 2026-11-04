@@ -1,5 +1,6 @@
 import { Command } from "commander";
 import { requestEmpty, type CliOptions } from "../client.js";
+import { resolveTarget } from "../target.js";
 import { confirm } from "../prompts.js";
 
 export async function deleteSite(
@@ -7,6 +8,7 @@ export async function deleteSite(
   options: { yes?: boolean },
   cliOptions: CliOptions = {}
 ) {
+  const target = resolveTarget(cliOptions);
   if (!options.yes) {
     const confirmed = await confirm(`Delete site '${subdomain}'?`);
     if (!confirmed) {
@@ -19,8 +21,7 @@ export async function deleteSite(
     `/sites/${subdomain}`,
     [204],
     { method: "DELETE" },
-    {
-      cliOptions,
+    { target,
       errors: { notFound: `Site '${subdomain}' not found`, fallback: "Unknown error" },
     }
   );

@@ -3,12 +3,12 @@ import { Command } from "commander";
 import {
   apiFetch,
   authHeaders,
-  getOptions,
   isRecord,
   requestJson,
   CliError,
   type CliOptions,
 } from "../client.js";
+import { resolveTarget } from "../target.js";
 import { checkServerCompatibility } from "../compat.js";
 import {
   clearCredential,
@@ -83,9 +83,9 @@ function isUser(value: unknown): value is AuthUser {
 }
 
 export async function login(cliOptions: CliOptions = {}) {
-  const options = getOptions(cliOptions);
+  const target = resolveTarget(cliOptions);
 
-  await checkServerCompatibility(cliOptions);
+  await checkServerCompatibility(target);
 
   const start = await requestJson(
     "/auth/device",
@@ -94,7 +94,7 @@ export async function login(cliOptions: CliOptions = {}) {
       invalid: "Server returned an invalid device authorization response",
     },
     { method: "POST" },
-    { auth: "none", cliOptions, errors: { fallback: "Failed to start login" } }
+    { target, auth: "none", errors: { fallback: "Failed to start login" } }
   );
 
   console.log(`\nOpen: ${start.verification_uri}`);
@@ -116,7 +116,7 @@ export async function login(cliOptions: CliOptions = {}) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ device_code: start.device_code }),
       },
-      { auth: "none", cliOptions, errors: { fallback: "Login failed" } }
+      { target, auth: "none", errors: { fallback: "Login failed" } }
     );
 
     if (poll.status === "pending") {
@@ -129,7 +129,7 @@ export async function login(cliOptions: CliOptions = {}) {
 
     if (poll.status === "complete" && poll.token && poll.user) {
       const config = loadConfig();
-      setCredential(config, options.server, poll.token);
+      setCredential(config, target.url, poll.token);
       saveConfig(config);
       console.log(`\nLogged in as ${poll.user.login}`);
       return;
@@ -140,13 +140,13 @@ export async function login(cliOptions: CliOptions = {}) {
 }
 
 export async function logout(cliOptions: CliOptions = {}) {
-  const options = getOptions(cliOptions);
   const config = loadConfig();
-  const token = getCredential(config, options.server);
+  const target = resolveTarget(cliOptions, config);
+  const token = getCredential(config, target.url);
 
   if (!token) {
-    console.log(`Not logged in to ${options.server}`);
-    if (options.token) {
+    console.log(`Not logged in to ${target.url}`);
+    if (target.credential === "flag" || target.credential === "env") {
       console.log(
         "Note: logout only clears credentials stored by 'buzz login'; --token and BUZZ_TOKEN are unaffected"
       );
@@ -159,7 +159,7 @@ export async function logout(cliOptions: CliOptions = {}) {
     const response = await apiFetch(
       "/auth/logout",
       { method: "POST", headers: authHeaders(token) },
-      { auth: "none", cliOptions }
+      { target, auth: "none" }
     );
     // 400 means the session is already invalid on the server.
     revoked = response.ok || response.status === 400;
@@ -167,14 +167,14 @@ export async function logout(cliOptions: CliOptions = {}) {
     revoked = false;
   }
 
-  clearCredential(config, options.server);
+  clearCredential(config, target.url);
   saveConfig(config);
 
   if (revoked) {
     console.log("Logged out");
   } else {
     console.log(
-      `Logged out locally, but the session on ${options.server} could not be revoked`
+      `Logged out locally, but the session on ${target.url} could not be revoked`
     );
   }
 }
@@ -184,7 +184,7 @@ export async function whoami(cliOptions: CliOptions = {}) {
     "/auth/me",
     { guard: isUser, invalid: "Server returned an invalid user response" },
     {},
-    { cliOptions }
+    { target: resolveTarget(cliOptions) }
   );
   console.log(`Logged in as ${user.login}${user.name ? ` (${user.name})` : ""}`);
 }

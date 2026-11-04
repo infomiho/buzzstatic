@@ -5,7 +5,7 @@ import {
   requestEmpty,
   requestJson,
   type ApiErrors,
-  type CliOptions,
+  type Target,
 } from "../client.js";
 import {
   isCapability,
@@ -39,7 +39,7 @@ function domainPath(siteName: string, suffix = ""): string {
 }
 
 export async function getDomainCapability(
-  cliOptions: CliOptions = {}
+  target: Target
 ): Promise<DomainCapability> {
   return requestJson(
     "/capabilities/custom-domains",
@@ -50,7 +50,7 @@ export async function getDomainCapability(
     },
     {},
     {
-      cliOptions,
+      target,
       errors: {
         ...domainErrors,
         notFound: new CliError(
@@ -65,14 +65,14 @@ export async function getDomainCapability(
 
 export async function getDomainClaims(
   siteName: string,
-  cliOptions: CliOptions = {}
+  target: Target
 ): Promise<DomainClaim[]> {
   return requestJson(
     domainPath(siteName),
     { guard: isClaimArray, invalid: invalidClaim, normalize: normalizeClaimArray },
     {},
     {
-      cliOptions,
+      target,
       errors: {
         ...domainErrors,
         notFound: `Site '${siteName}' not found`,
@@ -83,17 +83,17 @@ export async function getDomainClaims(
 }
 
 export async function getAllDomainClaims(
-  cliOptions: CliOptions = {}
+  target: Target
 ): Promise<DomainClaim[]> {
   const sites = await requestJson(
     "/sites",
     { guard: isSiteArray, invalid: "Server returned an invalid site response" },
     {},
-    { cliOptions, errors: { ...domainErrors, fallback: "Could not list sites" } }
+    { target, errors: { ...domainErrors, fallback: "Could not list sites" } }
   );
   const claims: DomainClaim[] = [];
   for (const site of sites) {
-    claims.push(...(await getDomainClaims(site.name, cliOptions)));
+    claims.push(...(await getDomainClaims(site.name, target)));
   }
   return claims.sort((a, b) =>
     `${a.site_name ?? ""}\0${a.hostname}`.localeCompare(
@@ -120,7 +120,7 @@ export function resolveDomainClaim(
 export async function createDomainClaim(
   siteName: string,
   hostname: string,
-  cliOptions: CliOptions = {}
+  target: Target
 ): Promise<DomainClaim> {
   return requestJson(
     domainPath(siteName),
@@ -130,33 +130,33 @@ export async function createDomainClaim(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ hostname }),
     },
-    { cliOptions, errors: { ...domainErrors, fallback: "Could not add custom domain" } }
+    { target, errors: { ...domainErrors, fallback: "Could not add custom domain" } }
   );
 }
 
 export async function checkDomainClaim(
   siteName: string,
   claimId: number,
-  cliOptions: CliOptions = {}
+  target: Target
 ): Promise<DomainClaim> {
   return requestJson(
     domainPath(siteName, `/${claimId}/check`),
     claimSpec(),
     { method: "POST" },
-    { cliOptions, errors: { ...domainErrors, fallback: "Could not check custom domain" } }
+    { target, errors: { ...domainErrors, fallback: "Could not check custom domain" } }
   );
 }
 
 export async function cancelDomainClaim(
   siteName: string,
   claimId: number,
-  cliOptions: CliOptions = {}
+  target: Target
 ): Promise<202 | 204> {
   return requestEmpty(
     domainPath(siteName, `/${claimId}`),
     [202, 204] as const,
     { method: "DELETE" },
-    { cliOptions, errors: { ...domainErrors, fallback: "Could not remove custom domain" } }
+    { target, errors: { ...domainErrors, fallback: "Could not remove custom domain" } }
   );
 }
 
@@ -164,14 +164,14 @@ async function updateDomainTransition(
   siteName: string,
   claimId: number,
   action: "retry" | "cancel",
-  cliOptions: CliOptions = {}
+  target: Target
 ): Promise<DomainClaim> {
   return requestJson(
     domainPath(siteName, `/${claimId}/transition/${action}`),
     claimSpec(),
     { method: "POST" },
     {
-      cliOptions,
+      target,
       errors: {
         ...domainErrors,
         fallback: `Could not ${action} custom-domain transition`,
@@ -183,11 +183,11 @@ async function updateDomainTransition(
 export const retryDomainTransition = (
   siteName: string,
   claimId: number,
-  cliOptions: CliOptions = {}
-) => updateDomainTransition(siteName, claimId, "retry", cliOptions);
+  target: Target
+) => updateDomainTransition(siteName, claimId, "retry", target);
 
 export const cancelDomainTransition = (
   siteName: string,
   claimId: number,
-  cliOptions: CliOptions = {}
-) => updateDomainTransition(siteName, claimId, "cancel", cliOptions);
+  target: Target
+) => updateDomainTransition(siteName, claimId, "cancel", target);

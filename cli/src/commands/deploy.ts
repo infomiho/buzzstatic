@@ -1,7 +1,8 @@
 import { Command } from "commander";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { getOptions, CliError, type CliOptions } from "../client.js";
+import { CliError, type CliOptions } from "../client.js";
+import { resolveTarget } from "../target.js";
 import { checkServerCompatibility } from "../compat.js";
 import { createProgressBar, createSpinner, formatSize } from "../lib.js";
 import {
@@ -17,13 +18,13 @@ export async function deploy(
   cliOptions: CliOptions = {},
   makePrivate = false
 ) {
-  const options = getOptions(cliOptions);
+  const target = resolveTarget(cliOptions);
 
-  if (!options.token) {
+  if (!target.token) {
     throw new CliError("Not authenticated", "Run 'buzz login' first");
   }
 
-  await checkServerCompatibility(cliOptions);
+  await checkServerCompatibility(target);
 
   siteName = resolveSiteName(process.cwd(), directory, siteName);
 
@@ -55,8 +56,7 @@ export async function deploy(
   let result: DeployResult;
   try {
     result = await uploadSite(
-      options.server,
-      options.token,
+      target,
       zipBuffer,
       siteName,
       globalThis.fetch,

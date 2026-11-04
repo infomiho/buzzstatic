@@ -1,7 +1,7 @@
 import { Blob } from "node:buffer";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { CliError, isRecord, requestJson } from "./client.js";
+import { CliError, isRecord, requestJson, type Target } from "./client.js";
 import { createZipBuffer } from "./lib.js";
 
 export interface DeployResult {
@@ -69,8 +69,7 @@ export async function packSite(
 }
 
 export async function uploadSite(
-  server: string,
-  token: string,
+  target: Target,
   zip: Buffer,
   siteName?: string,
   fetchFn: typeof fetch = globalThis.fetch,
@@ -95,8 +94,8 @@ export async function uploadSite(
     },
     { method: "POST", headers, body },
     {
+      target,
       fetchFn,
-      cliOptions: { server, token },
       errors: {
         unauthorized: new CliError("Not authenticated", "Run 'buzz login' first"),
         forbidden: (message) =>

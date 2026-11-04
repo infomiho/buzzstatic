@@ -1,4 +1,5 @@
-import { getOptions, isRecord, requestJson, type CliOptions } from "./client.js";
+import { isRecord, requestJson } from "./client.js";
+import type { Target } from "./target.js";
 import { CliError } from "./errors.js";
 import { cliVersion } from "./version.js";
 
@@ -34,7 +35,7 @@ function isOlderVersion(version: string, than: string): boolean {
 }
 
 export async function checkServerCompatibility(
-  cliOptions: CliOptions = {},
+  target: Target,
   fetchFn?: typeof fetch
 ): Promise<void> {
   let info: ServerVersionInfo;
@@ -43,7 +44,7 @@ export async function checkServerCompatibility(
       "/version",
       { guard: isServerVersionInfo, invalid: "Invalid version response" },
       { signal: AbortSignal.timeout(5000) },
-      { auth: "none", cliOptions, fetchFn }
+      { target, auth: "none", fetchFn }
     );
   } catch {
     // Unreachable, stalled, pre-0.3.0, or non-Buzz server: the real request reports it.
@@ -51,9 +52,8 @@ export async function checkServerCompatibility(
   }
 
   if (isOlderVersion(cliVersion, info.min_cli_version)) {
-    const { server } = getOptions(cliOptions);
     throw new CliError(
-      `Buzz CLI ${cliVersion} is older than the minimum version this server supports (${info.min_cli_version}). ${server} runs Buzz ${info.version}.`,
+      `Buzz CLI ${cliVersion} is older than the minimum version this server supports (${info.min_cli_version}). ${target.url} runs Buzz ${info.version}.`,
       `Install @infomiho/buzz-cli@${info.min_cli_version} or later: npm install --global @infomiho/buzz-cli. In CI, raise the pinned version.`
     );
   }

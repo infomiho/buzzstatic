@@ -1,39 +1,13 @@
 import { CliError } from "./errors.js";
-import {
-  DEFAULT_SERVER,
-  getCredential,
-  loadConfig,
-  normalizeServerUrl,
-} from "./credentials.js";
+import type { Target } from "./target.js";
 
 export { CliError } from "./errors.js";
+export type { CliOptions, Target } from "./target.js";
 
 export type Guard<T> = (value: unknown) => value is T;
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-export interface CliOptions {
-  server?: string;
-  token?: string;
-}
-
-export interface ResolvedOptions {
-  server: string;
-  token?: string;
-}
-
-export function getOptions(cliOptions: CliOptions = {}): ResolvedOptions {
-  const config = loadConfig();
-  const server = normalizeServerUrl(
-    cliOptions.server || process.env.BUZZ_SERVER || config.server || DEFAULT_SERVER
-  );
-  return {
-    server,
-    token:
-      cliOptions.token || process.env.BUZZ_TOKEN || getCredential(config, server),
-  };
 }
 
 export function authHeaders(token?: string): Record<string, string> {
@@ -72,8 +46,8 @@ export interface ApiErrors {
 }
 
 export interface ApiOptions {
+  target: Target;
   auth?: "required" | "none";
-  cliOptions?: CliOptions;
   fetchFn?: typeof fetch;
   errors?: ApiErrors;
 }
@@ -126,26 +100,20 @@ async function httpError(response: Response, errors: ApiErrors): Promise<CliErro
 export async function apiFetch(
   path: string,
   init: RequestInit = {},
-  opts: ApiOptions = {}
+  opts: ApiOptions
 ): Promise<Response> {
-  const {
-    auth = "required",
-    cliOptions = {},
-    fetchFn = globalThis.fetch,
-    errors = {},
-  } = opts;
-  const options = getOptions(cliOptions);
+  const { target, auth = "required", fetchFn = globalThis.fetch, errors = {} } = opts;
 
-  if (auth === "required" && !options.token) {
+  if (auth === "required" && !target.token) {
     throw new CliError("Not authenticated", "Run 'buzz login' first");
   }
 
   let response: Response;
   try {
-    response = await fetchFn(`${options.server}${path}`, {
+    response = await fetchFn(`${target.url}${path}`, {
       ...init,
       headers: {
-        ...(auth === "none" ? {} : authHeaders(options.token)),
+        ...(auth === "none" ? {} : authHeaders(target.token)),
         ...init.headers,
       },
     });
@@ -175,7 +143,7 @@ export async function requestJson<T>(
   path: string,
   spec: JsonSpec<T>,
   init: RequestInit = {},
-  opts: ApiOptions = {}
+  opts: ApiOptions
 ): Promise<T> {
   const response = await apiFetch(path, init, opts);
   if (!response.ok) {
@@ -194,7 +162,7 @@ export async function requestEmpty<S extends number>(
   path: string,
   okStatuses: readonly S[],
   init: RequestInit = {},
-  opts: ApiOptions = {}
+  opts: ApiOptions
 ): Promise<S> {
   const response = await apiFetch(path, init, opts);
   const matched = okStatuses.find((status) => status === response.status);

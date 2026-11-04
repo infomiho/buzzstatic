@@ -9,10 +9,13 @@ export function createProgram(): Command {
     .name("buzz")
     .description("Deploy static sites to a Buzz server")
     .version(cliVersion)
-    .option("-s, --server <url>", "Buzz server URL (overrides config)")
+    .option(
+      "-s, --server <url>",
+      "Buzz server URL for this command (overrides BUZZ_SERVER and the saved default)"
+    )
     .option(
       "-t, --token <token>",
-      "Session or deployment token (overrides config)"
+      "Session or deployment token for this command (overrides BUZZ_TOKEN and the saved session)"
     );
 
   registerCommands(program);

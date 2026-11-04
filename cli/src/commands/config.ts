@@ -1,38 +1,17 @@
 import { Command } from "commander";
 import { CliError } from "../lib.js";
-import { CONFIG_PATH, loadConfig, normalizeServerUrl, saveConfig } from "../credentials.js";
+import { loadConfig, normalizeServerUrl, saveConfig } from "../credentials.js";
+import type { CliOptions } from "../target.js";
+import { showServers } from "./server.js";
 
-export function configCommand(key?: string, value?: string) {
-  const config = loadConfig();
-
+export function configCommand(key?: string, value?: string, cliOptions: CliOptions = {}) {
   if (!key) {
-    const credentials = config.credentials ?? {};
-    const servers = Object.keys(credentials);
-    if (!config.server && servers.length === 0) {
-      console.log("No configuration set");
-      console.log(`\nConfig file: ${CONFIG_PATH}`);
-      console.log("\nUsage:");
-      console.log("  buzz config server <url>    Set server URL");
-      return;
-    }
-    console.log("Current configuration:");
-    if (config.server) {
-      let server = config.server;
-      try {
-        server = normalizeServerUrl(server);
-      } catch {
-        // show the raw value so the user can spot and fix it
-      }
-      console.log(`  server: ${server}`);
-    }
-    for (const server of servers) {
-      console.log(`  token (${server}): ${credentials[server].slice(0, 16)}...`);
-    }
-    console.log(`\nConfig file: ${CONFIG_PATH}`);
+    showServers({}, cliOptions);
     return;
   }
 
   if (key === "server" && value) {
+    const config = loadConfig();
     const server = normalizeServerUrl(value);
     config.server = server;
     saveConfig(config);
@@ -49,5 +28,5 @@ export function registerConfigCommand(program: Command) {
   program
     .command("config [key] [value]")
     .description("View or set configuration (server)")
-    .action(configCommand);
+    .action((key?: string, value?: string) => configCommand(key, value, program.opts()));
 }
