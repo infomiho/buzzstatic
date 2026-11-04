@@ -8,7 +8,7 @@ import {
   type CliOptions,
   type Target,
 } from "../client.js";
-import { resolveTarget } from "../target.js";
+import { resolveTarget, sessionRequired } from "../target.js";
 import { confirm } from "../prompts.js";
 import { resolveCurrentSite } from "../site.js";
 
@@ -29,12 +29,9 @@ interface PublicDependencies {
 }
 
 const accessErrors: ApiErrors = {
-  forbidden: (message) =>
+  forbidden: (message, target) =>
     message === "Deploy tokens cannot perform this operation"
-      ? new CliError(
-          "Deployment tokens cannot manage site access",
-          "Run 'buzz login' and retry with a full session"
-        )
+      ? sessionRequired(target, "Deployment tokens cannot manage site access")
       : new CliError(message),
 };
 

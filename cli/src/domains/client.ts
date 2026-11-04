@@ -7,6 +7,7 @@ import {
   type ApiErrors,
   type Target,
 } from "../client.js";
+import { sessionRequired } from "../target.js";
 import {
   isCapability,
   isClaim,
@@ -19,12 +20,9 @@ import {
 } from "./schema.js";
 
 const domainErrors: ApiErrors = {
-  forbidden: (message) =>
+  forbidden: (message, target) =>
     message === "Deploy tokens cannot perform this operation"
-      ? new CliError(
-          "Deployment tokens cannot manage custom domains",
-          "Run 'buzz login' and retry with a full session"
-        )
+      ? sessionRequired(target, "Deployment tokens cannot manage custom domains")
       : new CliError(message),
 };
 

@@ -110,7 +110,7 @@ export function selectServer(cliOptions: CliOptions, config: Config): Selection 
   }
 }
 
-export function noServerSelected(config: Config): CliError {
+function noServerSelected(config: Config): CliError {
   const names = Object.keys(config.servers ?? {});
   const tip = names.length
     ? `${savedNamesTip(config)}. Pass --server <name> or run 'buzz server default <name>'`
@@ -136,4 +136,49 @@ export function resolveTarget(cliOptions: CliOptions = {}, config: Config = load
   const selection = selectServer(cliOptions, config);
   if (!selection) throw noServerSelected(config);
   return withCredential(selection, cliOptions, config);
+}
+
+export function loginCommand(server: Server): string {
+  return `buzz login --server ${serverSelector(server)}`;
+}
+
+export function credentialRecovery(target: Target): string {
+  const login = loginCommand(target);
+  if (target.credential === "flag") {
+    if (target.hasEnvToken) return "Replace --token, or omit it to use BUZZ_TOKEN";
+    if (target.hasSavedSession) return "Replace --token, or omit it to use the saved session";
+    return `Replace --token, or omit it and run: ${login}`;
+  }
+  if (target.credential === "env") {
+    if (target.hasSavedSession) return "Update BUZZ_TOKEN, or unset it to use the saved session";
+    return `Update BUZZ_TOKEN, or unset it and run: ${login}`;
+  }
+  return `Run: ${login}`;
+}
+
+const REJECTED: Record<CredentialSource, (server: string) => string> = {
+  flag: (server) => `The token from --token was rejected by ${server}`,
+  env: (server) => `The token from BUZZ_TOKEN was rejected by ${server}`,
+  saved_session: (server) => `Your saved session for ${server} was rejected`,
+  none: (server) => `${server} requires sign-in`,
+};
+
+export function rejectedCredential(target: Target): CliError {
+  return new CliError(
+    REJECTED[target.credential](serverLabel(target)),
+    credentialRecovery(target),
+    "AUTH_REJECTED"
+  );
+}
+
+export function missingCredential(target: Target): CliError {
+  return new CliError(
+    `No saved session for ${serverLabel(target)}`,
+    credentialRecovery(target),
+    "NOT_AUTHENTICATED"
+  );
+}
+
+export function sessionRequired(target: Target, message: string): CliError {
+  return new CliError(message, credentialRecovery(target), "SESSION_REQUIRED");
 }

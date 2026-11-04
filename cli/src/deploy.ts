@@ -97,7 +97,6 @@ export async function uploadSite(
       target,
       fetchFn,
       errors: {
-        unauthorized: new CliError("Not authenticated", "Run 'buzz login' first"),
         forbidden: (message) =>
           new CliError(
             message,

@@ -1,5 +1,5 @@
 import { CliError } from "./errors.js";
-import type { Target } from "./target.js";
+import { missingCredential, rejectedCredential, serverLabel, type Target } from "./target.js";
 
 export { CliError } from "./errors.js";
 export type { CliOptions, Target } from "./target.js";
@@ -40,7 +40,7 @@ export function isSiteArray(value: unknown): value is Site[] {
 
 export interface ApiErrors {
   unauthorized?: CliError;
-  forbidden?: (serverMessage: string) => CliError;
+  forbidden?: (serverMessage: string, target: Target) => CliError;
   notFound?: string | CliError;
   fallback?: string;
 }
@@ -105,7 +105,7 @@ export async function apiFetch(
   const { target, auth = "required", fetchFn = globalThis.fetch, errors = {} } = opts;
 
   if (auth === "required" && !target.token) {
-    throw new CliError("Not authenticated", "Run 'buzz login' first");
+    throw missingCredential(target);
   }
 
   let response: Response;
@@ -118,21 +118,21 @@ export async function apiFetch(
       },
     });
   } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
     throw new CliError(
-      `Could not connect to server - ${error instanceof Error ? error.message : error}`
+      `Could not connect to ${serverLabel(target)} - ${reason}`,
+      undefined,
+      "CONNECTION_FAILED"
     );
   }
 
   if (auth !== "none") {
     if (response.status === 401) {
-      throw (
-        errors.unauthorized ??
-        new CliError("Session expired", "Run 'buzz login' to re-authenticate")
-      );
+      throw errors.unauthorized ?? rejectedCredential(target);
     }
     if (response.status === 403) {
       const message = await errorMessage(response, "Permission denied");
-      throw errors.forbidden ? errors.forbidden(message) : new CliError(message);
+      throw errors.forbidden ? errors.forbidden(message, target) : new CliError(message);
     }
   }
 

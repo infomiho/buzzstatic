@@ -36,9 +36,9 @@ Use this reference to check command syntax and options. Start with [Deploy Your 
 - [`buzz server add`](#buzz-server-add): Save a server under a name, without signing in
 - [`buzz server default`](#buzz-server-default): Change the saved default server
 - [`buzz server remove`](#buzz-server-remove): Remove a server name, keeping its session and default
-- [`buzz login`](#buzz-login): Sign in via your browser
-- [`buzz logout`](#buzz-logout): Sign out and clear the stored session
-- [`buzz whoami`](#buzz-whoami): Show the current signed-in user
+- [`buzz login`](#buzz-login): Sign in to the selected server via your browser (keeps the default)
+- [`buzz logout`](#buzz-logout): Sign out of the selected server and remove its saved session
+- [`buzz whoami`](#buzz-whoami): Verify which account the selected server signs you in as
 - [`buzz config`](#buzz-config): Show servers, or set the default with 'config server <url>' (same as 'server default')
 
 ## buzz
@@ -73,9 +73,12 @@ Automation:
 Servers and account:
   server [options]              Show saved servers, the default, and which one
                                 commands target
-  login                         Sign in via your browser
-  logout                        Sign out and clear the stored session
-  whoami                        Show the current signed-in user
+  login [options]               Sign in to the selected server via your browser
+                                (keeps the default)
+  logout                        Sign out of the selected server and remove its
+                                saved session
+  whoami [options]              Verify which account the selected server signs
+                                you in as
   config [key] [value]          Show servers, or set the default with 'config
                                 server <url>' (same as 'server default')
 
@@ -579,9 +582,11 @@ Options:
 ```text
 Usage: buzz login [options]
 
-Sign in via your browser
+Sign in to the selected server via your browser (keeps the default)
 
 Options:
+  --no-browser                Print the approval URL and code without opening a
+                              browser
   -h, --help                  display help for command
 
 Global Options:
@@ -597,7 +602,7 @@ Global Options:
 ```text
 Usage: buzz logout [options]
 
-Sign out and clear the stored session
+Sign out of the selected server and remove its saved session
 
 Options:
   -h, --help                  display help for command
@@ -615,9 +620,10 @@ Global Options:
 ```text
 Usage: buzz whoami [options]
 
-Show the current signed-in user
+Verify which account the selected server signs you in as
 
 Options:
+  --json                      Print the result as JSON
   -h, --help                  display help for command
 
 Global Options:

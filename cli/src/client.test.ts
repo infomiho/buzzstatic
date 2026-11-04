@@ -30,8 +30,8 @@ describe("apiFetch authentication", () => {
     await expect(
       apiFetch("/x", {}, { target: testTarget({ credential: "none", token: undefined }), fetchFn })
     ).rejects.toMatchObject({
-      message: "Not authenticated",
-      tip: "Run 'buzz login' first",
+      message: "No saved session for https://buzz.example.com",
+      tip: "Run: buzz login --server https://buzz.example.com",
     });
     expect(fetchFn).not.toHaveBeenCalled();
   });
@@ -74,16 +74,16 @@ describe("apiFetch errors", () => {
     };
 
     await expect(apiFetch("/x", {}, { target, fetchFn })).rejects.toThrow(
-      "Could not connect to server - ECONNREFUSED"
+      "Could not connect to https://buzz.example.com - ECONNREFUSED"
     );
   });
 
-  it("maps 401 to a session-expired error by default", async () => {
+  it("maps 401 to a rejected-credential error that keeps the server", async () => {
     const fetchFn = fetchOnce(new Response(null, { status: 401 }));
 
     await expect(apiFetch("/x", {}, { target, fetchFn })).rejects.toMatchObject({
-      message: "Session expired",
-      tip: "Run 'buzz login' to re-authenticate",
+      message: "The token from --token was rejected by https://buzz.example.com",
+      tip: "Replace --token, or omit it and run: buzz login --server https://buzz.example.com",
     });
   });
 

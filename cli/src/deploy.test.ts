@@ -218,7 +218,7 @@ describe("uploadSite", () => {
         undefined,
         fakeFetch(401, { detail: "Unauthorized" })
       )
-    ).rejects.toThrow("Not authenticated");
+    ).rejects.toThrow("was rejected by http://localhost:8080");
   });
 
   it("explains ownership conflicts", async () => {

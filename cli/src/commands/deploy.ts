@@ -2,7 +2,7 @@ import { Command } from "commander";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { CliError, type CliOptions } from "../client.js";
-import { resolveTarget } from "../target.js";
+import { missingCredential, resolveTarget } from "../target.js";
 import { checkServerCompatibility } from "../compat.js";
 import { createProgressBar, createSpinner, formatSize } from "../lib.js";
 import {
@@ -20,9 +20,7 @@ export async function deploy(
 ) {
   const target = resolveTarget(cliOptions);
 
-  if (!target.token) {
-    throw new CliError("Not authenticated", "Run 'buzz login' first");
-  }
+  if (!target.token) throw missingCredential(target);
 
   await checkServerCompatibility(target);
 
