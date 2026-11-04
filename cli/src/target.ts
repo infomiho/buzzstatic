@@ -11,7 +11,7 @@ export type CredentialSource = "flag" | "env" | "saved_session" | "none";
 
 export interface Server {
   url: string;
-  name?: string;
+  name?: string | null;
 }
 
 export interface Selection extends Server {
@@ -57,15 +57,14 @@ export function resolveSelector(value: string, _config: Config): Server {
   return { url: normalizeServerUrl(value) };
 }
 
-function explicitSelector(
-  cliOptions: CliOptions
+function selector(
+  cliOptions: CliOptions,
+  config: Config
 ): { value: string; source: SelectionSource } | undefined {
-  if (cliOptions.server !== undefined) {
-    return { value: cliOptions.server, source: "flag" };
-  }
-  if (process.env.BUZZ_SERVER) {
-    return { value: process.env.BUZZ_SERVER, source: "env" };
-  }
+  if (cliOptions.server !== undefined) return { value: cliOptions.server, source: "flag" };
+  const env = process.env.BUZZ_SERVER?.trim();
+  if (env) return { value: env, source: "env" };
+  if (config.server) return { value: config.server, source: "default" };
   return undefined;
 }
 
@@ -75,22 +74,13 @@ function withSource(error: unknown, source: SelectionSource): unknown {
 }
 
 export function selectServer(cliOptions: CliOptions, config: Config): Selection | undefined {
-  const explicit = explicitSelector(cliOptions);
-  if (explicit) {
-    try {
-      return { ...resolveSelector(explicit.value, config), source: explicit.source };
-    } catch (error) {
-      throw withSource(error, explicit.source);
-    }
+  const chosen = selector(cliOptions, config);
+  if (!chosen) return undefined;
+  try {
+    return { ...resolveSelector(chosen.value, config), source: chosen.source };
+  } catch (error) {
+    throw withSource(error, chosen.source);
   }
-  if (config.server) {
-    try {
-      return { ...resolveSelector(config.server, config), source: "default" };
-    } catch (error) {
-      throw withSource(error, "default");
-    }
-  }
-  return undefined;
 }
 
 export function noServerSelected(): CliError {

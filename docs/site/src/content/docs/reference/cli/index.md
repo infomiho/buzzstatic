@@ -32,8 +32,7 @@ Use this reference to check command syntax and options. Start with [Deploy Your 
 - [`buzz tokens list`](#buzz-tokens-list): List your deployment tokens
 - [`buzz tokens create`](#buzz-tokens-create): Create a deployment token for a site
 - [`buzz tokens delete`](#buzz-tokens-delete): Delete a deployment token
-- [`buzz server`](#buzz-server): Show saved servers and which one commands target
-- [`buzz server list`](#buzz-server-list): Show saved servers, the default, and the current target (default)
+- [`buzz server`](#buzz-server): Show saved servers, the default, and which one commands target
 - [`buzz login`](#buzz-login): Sign in via your browser
 - [`buzz logout`](#buzz-logout): Sign out and clear the stored session
 - [`buzz whoami`](#buzz-whoami): Show the current signed-in user
@@ -69,7 +68,8 @@ Automation:
   tokens                        Manage deployment tokens
 
 Servers and account:
-  server                        Show saved servers and which one commands target
+  server [options]              Show saved servers, the default, and which one
+                                commands target
   login                         Sign in via your browser
   logout                        Sign out and clear the stored session
   whoami                        Show the current signed-in user
@@ -363,25 +363,9 @@ Options:
 ## buzz server
 
 ```text
-Usage: buzz server [options] [command]
+Usage: buzz server [options]
 
-Show saved servers and which one commands target
-
-Options:
-  -h, --help      display help for command
-
-Commands:
-  list [options]  Show saved servers, the default, and the current target
-                  (default)
-  help [command]  display help for command
-```
-
-## buzz server list
-
-```text
-Usage: buzz server list [options]
-
-Show saved servers, the default, and the current target (default)
+Show saved servers, the default, and which one commands target
 
 Options:
   --json      Print the overview as JSON

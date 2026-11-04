@@ -1,6 +1,6 @@
 import { Command } from "commander";
 import { CliError } from "../errors.js";
-import { CONFIG_PATH, loadConfig, normalizeServerUrl, type Config } from "../credentials.js";
+import { CONFIG_PATH, loadConfig, tryNormalize, type Config } from "../credentials.js";
 import {
   CREDENTIAL_LABELS,
   SELECTION_LABELS,
@@ -11,7 +11,6 @@ import {
   type CliOptions,
   type CredentialSource,
   type Selection,
-  type Server,
 } from "../target.js";
 
 interface ServerEntry {
@@ -42,27 +41,15 @@ function toError(error: unknown): OverviewError {
   return { code: "ERROR", message: error instanceof Error ? error.message : String(error) };
 }
 
-function tryNormalize(raw: string): string {
-  try {
-    return normalizeServerUrl(raw);
-  } catch {
-    return raw;
-  }
-}
-
 function knownServers(config: Config): ServerEntry[] {
   const urls = new Set<string>();
-  if (config.server) urls.add(tryNormalize(config.server));
+  if (config.server) urls.add(tryNormalize(config.server) ?? config.server);
   for (const url of Object.keys(config.credentials ?? {})) urls.add(url);
   return [...urls].map((url) => ({
     name: null,
     url,
     session_saved: config.credentials?.[url] !== undefined,
   }));
-}
-
-function nullableServer(server: Server): { name: string | null; url: string } {
-  return { name: server.name ?? null, url: server.url };
 }
 
 export function inspectServers(cliOptions: CliOptions = {}): Overview {
@@ -84,22 +71,18 @@ export function inspectServers(cliOptions: CliOptions = {}): Overview {
 
   overview.servers = knownServers(config);
   if (config.server) {
-    overview.default_server = { name: null, url: tryNormalize(config.server) };
+    overview.default_server = { name: null, url: tryNormalize(config.server) ?? config.server };
   }
   try {
     const selection = selectServer(cliOptions, config);
     if (selection) {
-      overview.selected_server = { ...nullableServer(selection), source: selection.source };
+      overview.selected_server = { name: selection.name ?? null, url: selection.url, source: selection.source };
       overview.authentication.source = withCredential(selection, cliOptions, config).credential;
     }
   } catch (error) {
     overview.error = toError(error);
   }
   return overview;
-}
-
-function asServer(server: { name: string | null; url: string }): Server {
-  return { url: server.url, name: server.name ?? undefined };
 }
 
 function serverTable(overview: Overview): string[] {
@@ -124,14 +107,14 @@ function serverTable(overview: Overview): string[] {
 function authenticationLine(overview: Overview): string {
   const { source } = overview.authentication;
   if (source === "saved_session" && overview.selected_server) {
-    return `saved session for ${serverLabel(asServer(overview.selected_server))}`;
+    return `saved session for ${serverLabel(overview.selected_server)}`;
   }
   return CREDENTIAL_LABELS[source];
 }
 
 function targetLines(overview: Overview): string[] {
   const defaultServer = overview.default_server
-    ? serverLabel(asServer(overview.default_server))
+    ? serverLabel(overview.default_server)
     : "none";
   const lines = [`Default server: ${defaultServer}`];
   const selected = overview.selected_server;
@@ -139,12 +122,11 @@ function targetLines(overview: Overview): string[] {
     lines.push(`Selected server: ${overview.error ? "unresolved" : "none"}`);
     return lines;
   }
-  const server = asServer(selected);
   lines.push(
-    `Selected server: ${serverLabel(server)}`,
+    `Selected server: ${serverLabel(selected)}`,
     `Selected by: ${SELECTION_LABELS[selected.source]}`,
     `Authentication: ${authenticationLine(overview)}`,
-    `Verify account: buzz whoami --server ${serverSelector(server)}`
+    `Verify account: buzz whoami --server ${serverSelector(selected)}`
   );
   return lines;
 }
@@ -177,12 +159,9 @@ export function showServers(options: { json?: boolean }, cliOptions: CliOptions 
 }
 
 export function registerServerCommand(program: Command): void {
-  const server = program
+  program
     .command("server")
-    .description("Show saved servers and which one commands target");
-  server
-    .command("list", { isDefault: true })
-    .description("Show saved servers, the default, and the current target (default)")
+    .description("Show saved servers, the default, and which one commands target")
     .option("--json", "Print the overview as JSON")
     .action((options: { json?: boolean }) => showServers(options, program.opts()));
 }

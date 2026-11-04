@@ -108,19 +108,15 @@ describe("loadConfig", () => {
     expect(getCredential(config, LEGACY_DEFAULT_SERVER)).toBe("legacy");
   });
 
-  it("migrates a legacy token to BUZZ_SERVER when no server is configured", () => {
+  it("binds a legacy token to the migrated default, not a transient BUZZ_SERVER", () => {
     const path = tmpConfigPath();
     writeFileSync(path, JSON.stringify({ token: "legacy" }));
-
     process.env.BUZZ_SERVER = "https://env.example.com";
-    try {
-      const config = loadConfig(path);
 
-      expect(getCredential(config, "https://env.example.com")).toBe("legacy");
-      expect(getCredential(config, LEGACY_DEFAULT_SERVER)).toBeUndefined();
-    } finally {
-      delete process.env.BUZZ_SERVER;
-    }
+    const config = loadConfig(path);
+
+    expect(getCredential(config, LEGACY_DEFAULT_SERVER)).toBe("legacy");
+    expect(getCredential(config, "https://env.example.com")).toBeUndefined();
   });
 
   it("prefers the configured server over BUZZ_SERVER for legacy migration", () => {
@@ -215,6 +211,26 @@ describe("config migration", () => {
     const saved = JSON.parse(readFileSync(path, "utf-8"));
     expect(saved).toMatchObject({ version: 2, server: LEGACY_DEFAULT_SERVER });
     expect(statSync(path).mode & 0o777).toBe(0o600);
+  });
+
+  it("treats an empty legacy server as the former localhost target", () => {
+    const path = tmpConfigPath();
+    writeFileSync(path, JSON.stringify({ server: "", credentials: { "https://b.example.com": "b" } }));
+
+    expect(loadConfig(path).server).toBe(LEGACY_DEFAULT_SERVER);
+  });
+
+  it("keeps working when the migrated config cannot be saved", () => {
+    const dir = mkdtempSync(join(tmpdir(), "buzz-readonly-"));
+    const path = join(dir, "config.json");
+    writeFileSync(path, JSON.stringify({ credentials: { "https://b.example.com": "b" } }));
+    chmodSync(dir, 0o500);
+    try {
+      expect(loadConfig(path).server).toBe(LEGACY_DEFAULT_SERVER);
+      expect(readdirSync(dir)).toEqual(["config.json"]);
+    } finally {
+      chmodSync(dir, 0o700);
+    }
   });
 
   it("does not add a default to a current config without one", () => {

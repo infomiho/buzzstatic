@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { CliError } from "./errors.js";
@@ -44,7 +44,7 @@ export function normalizeServerUrl(raw: string): string {
   return `${url.protocol}//${url.host}${path}`;
 }
 
-function tryNormalize(raw: string): string | undefined {
+export function tryNormalize(raw: string): string | undefined {
   try {
     return normalizeServerUrl(raw);
   } catch {
@@ -85,7 +85,7 @@ function readRawConfig(path: string): Record<string, unknown> | undefined {
 
 function parseConfig(raw: Record<string, unknown>): Config {
   const config: Config = {};
-  if (typeof raw.server === "string") {
+  if (typeof raw.server === "string" && raw.server.trim()) {
     config.server = tryNormalize(raw.server) ?? raw.server;
   }
   if (typeof raw.credentials === "object" && raw.credentials !== null) {
@@ -99,17 +99,11 @@ function parseConfig(raw: Record<string, unknown>): Config {
   return config;
 }
 
-function isFreshConfig(raw: Record<string, unknown>): boolean {
-  return Object.keys(raw).length === 0;
-}
-
 // Before version 2 the CLI targeted localhost when no server was saved, and a
 // single unscoped token belonged to whichever server was targeted at the time.
 function migrateLegacyConfig(raw: Record<string, unknown>, config: Config): void {
   if (typeof raw.token === "string") {
-    const server = tryNormalize(
-      config.server || process.env.BUZZ_SERVER || LEGACY_DEFAULT_SERVER
-    );
+    const server = tryNormalize(config.server ?? LEGACY_DEFAULT_SERVER);
     if (server && getCredential(config, server) === undefined) {
       setCredential(config, server, raw.token);
     }
@@ -122,9 +116,13 @@ export function loadConfig(path: string = CONFIG_PATH): Config {
   if (!raw) return {};
 
   const config = parseConfig(raw);
-  if (raw.version === undefined && !isFreshConfig(raw)) {
+  if (raw.version === undefined && Object.keys(raw).length > 0) {
     migrateLegacyConfig(raw, config);
-    saveConfig(config, path);
+    try {
+      saveConfig(config, path);
+    } catch {
+      // A read-only config still works; migration is retried on the next load.
+    }
   }
   return config;
 }
@@ -132,7 +130,12 @@ export function loadConfig(path: string = CONFIG_PATH): Config {
 export function saveConfig(config: Config, path: string = CONFIG_PATH): void {
   const tmpPath = `${path}.${process.pid}.tmp`;
   const versioned = { version: CONFIG_VERSION, ...config };
-  writeFileSync(tmpPath, JSON.stringify(versioned, null, 2) + "\n", { mode: 0o600 });
-  chmodSync(tmpPath, 0o600);
-  renameSync(tmpPath, path);
+  try {
+    writeFileSync(tmpPath, JSON.stringify(versioned, null, 2) + "\n", { mode: 0o600 });
+    chmodSync(tmpPath, 0o600);
+    renameSync(tmpPath, path);
+  } catch (error) {
+    rmSync(tmpPath, { force: true });
+    throw error;
+  }
 }
