@@ -11,11 +11,11 @@
         {% else %}
         <h1 class="heading-m">Approve CLI sign-in</h1>
         <dl class="mt-4 flex flex-col gap-1 border-l-4 border-ink pl-3">
-            <div class="flex flex-wrap gap-x-2">
+            <div class="flex flex-wrap gap-x-3">
                 <dt class="font-bold">Server</dt>
                 <dd class="font-mono break-words">{{ server_url }}</dd>
             </div>
-            <div class="flex flex-wrap gap-x-2">
+            <div class="flex flex-wrap gap-x-3">
                 <dt class="font-bold">Account</dt>
                 <dd>@{{ user.github_login }}</dd>
             </div>
@@ -24,13 +24,13 @@
         {% if outcome == "invalid" %}
         <div class="alert-destructive mt-5" role="alert">
             <h2>There is a problem</h2>
-            <p class="mt-2 break-words">That code is not valid or has expired. Get a new one by running <code class="font-mono">buzz login --server {{ server_url }}</code></p>
+            <p id="user_code_error" class="mt-2 break-words">That code is not valid or has expired. Get a new one by running <code class="font-mono">buzz login --server {{ server_url }}</code></p>
         </div>
         {% endif %}
         <form action="/device" method="post" class="mt-6 flex flex-col items-start gap-4">
             <div class="flex w-full flex-col gap-1 sm:max-w-xs">
                 <label for="user_code" class="font-bold">Device code</label>
-                <input id="user_code" name="user_code" class="input font-mono text-2xl tracking-widest" autocomplete="off" placeholder="XXXX-XXXX" required autofocus{% if outcome == "invalid" %} aria-invalid="true"{% endif %}>
+                <input id="user_code" name="user_code" class="input font-mono text-2xl tracking-widest" autocomplete="off" placeholder="XXXX-XXXX" required autofocus{% if outcome == "invalid" %} aria-invalid="true" aria-describedby="user_code_error"{% endif %}>
             </div>
             <button type="submit" class="btn">Approve sign-in as @{{ user.github_login }}</button>
         </form>

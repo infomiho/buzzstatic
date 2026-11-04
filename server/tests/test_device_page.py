@@ -7,12 +7,12 @@ from fastapi.testclient import TestClient
 
 from server.cookies import COOKIE_NAME
 
-SERVER_URL = "http://localhost:8080"
+SERVER_URL = "https://buzz.example.com"
 
 
 @pytest.fixture
 def app(make_app):
-    return make_app()
+    return make_app(domain="buzz.example.com")
 
 
 @pytest.fixture
@@ -37,7 +37,7 @@ def signed_in_client(app, database):
 
 
 def test_unauthenticated_visitor_signs_in_and_returns_to_approval(app):
-    response = TestClient(app).get("/device", follow_redirects=False)
+    response = TestClient(app, base_url=SERVER_URL).get("/device", follow_redirects=False)
 
     assert response.status_code == 303
     assert response.headers["location"] == "/?next=/device"
@@ -59,7 +59,7 @@ def test_invalid_code_suggests_login_on_this_server(signed_in_client):
 
     assert 'role="alert"' in page
     assert f"buzz login --server {SERVER_URL}" in page
-    assert 'aria-invalid="true"' in page
+    assert 'aria-describedby="user_code_error"' in page
 
 
 def test_success_names_server_and_account(app, signed_in_client):
@@ -68,5 +68,6 @@ def test_success_names_server_and_account(app, signed_in_client):
     page = signed_in_client.post("/device", data={"user_code": grant.user_code}).text
 
     assert "Device connected" in page
+    assert app.state.device_authorization.poll(grant.device_code) is not None
     assert SERVER_URL in page
     assert "@alice" in page
