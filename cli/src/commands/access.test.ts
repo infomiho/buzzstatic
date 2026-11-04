@@ -128,7 +128,7 @@ describe("access commands", () => {
 
     await expect(accessStatus({ site: "my-site" }, cliOptions)).rejects.toMatchObject({
       message: "Deployment tokens cannot manage site access",
-      tip: "Replace --token, or omit it and run: buzz login --server https://buzz.example.com",
+      tip: "Omit --token, then run: buzz login --server https://buzz.example.com",
     });
   });
 });

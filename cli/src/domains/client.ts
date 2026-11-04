@@ -4,10 +4,10 @@ import {
   isSiteArray,
   requestEmpty,
   requestJson,
+  sessionOnly,
   type ApiErrors,
   type Target,
 } from "../client.js";
-import { sessionRequired } from "../target.js";
 import {
   isCapability,
   isClaim,
@@ -20,10 +20,7 @@ import {
 } from "./schema.js";
 
 const domainErrors: ApiErrors = {
-  forbidden: (message, target) =>
-    message === "Deploy tokens cannot perform this operation"
-      ? sessionRequired(target, "Deployment tokens cannot manage custom domains")
-      : new CliError(message),
+  forbidden: sessionOnly("manage custom domains"),
 };
 
 const invalidClaim = "Server returned an invalid custom-domain response";

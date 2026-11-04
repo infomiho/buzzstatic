@@ -1,5 +1,11 @@
 import { CliError } from "./errors.js";
-import { missingCredential, rejectedCredential, serverLabel, type Target } from "./target.js";
+import {
+  missingCredential,
+  rejectedCredential,
+  serverLabel,
+  sessionRequired,
+  type Target,
+} from "./target.js";
 
 export { CliError } from "./errors.js";
 export type { CliOptions, Target } from "./target.js";
@@ -43,6 +49,13 @@ export interface ApiErrors {
   forbidden?: (serverMessage: string, target: Target) => CliError;
   notFound?: string | CliError;
   fallback?: string;
+}
+
+export function sessionOnly(action: string): ApiErrors["forbidden"] {
+  return (message, target) =>
+    message === "Deploy tokens cannot perform this operation"
+      ? sessionRequired(target, `Deployment tokens cannot ${action}`)
+      : new CliError(message);
 }
 
 export interface ApiOptions {

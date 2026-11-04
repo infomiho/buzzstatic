@@ -4,11 +4,12 @@ import {
   isRecord,
   requestEmpty,
   requestJson,
+  sessionOnly,
   type ApiErrors,
   type CliOptions,
   type Target,
 } from "../client.js";
-import { announcedTarget, serverLabel, sessionRequired } from "../target.js";
+import { announcedTarget, serverLabel } from "../target.js";
 import { confirm } from "../prompts.js";
 import { resolveCurrentSite } from "../site.js";
 
@@ -29,10 +30,7 @@ interface PublicDependencies {
 }
 
 const accessErrors: ApiErrors = {
-  forbidden: (message, target) =>
-    message === "Deploy tokens cannot perform this operation"
-      ? sessionRequired(target, "Deployment tokens cannot manage site access")
-      : new CliError(message),
+  forbidden: sessionOnly("manage site access"),
 };
 
 function isAccessState(value: unknown): value is AccessState {

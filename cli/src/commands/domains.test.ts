@@ -344,7 +344,7 @@ describe("domain commands", () => {
 
     await expect(listDomains("my-site", cliOptions)).rejects.toMatchObject({
       message: "Deployment tokens cannot manage custom domains",
-      tip: "Replace --token, or omit it and run: buzz login --server https://buzz.example.com",
+      tip: "Omit --token, then run: buzz login --server https://buzz.example.com",
     });
   });
 });

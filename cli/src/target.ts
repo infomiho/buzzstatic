@@ -148,8 +148,16 @@ export function loginCommand(server: Server): string {
   return `buzz login --server ${serverSelector(server)}`;
 }
 
+export function runningInCi(): boolean {
+  const ci = process.env.CI?.trim().toLowerCase();
+  return !!ci && ci !== "false" && ci !== "0";
+}
+
 export function credentialRecovery(target: Target): string {
   const login = loginCommand(target);
+  if (runningInCi() && target.credential !== "saved_session") {
+    return `Update the ${target.credential === "flag" ? "--token value" : "BUZZ_TOKEN secret"} with a valid deployment token for ${serverLabel(target)}`;
+  }
   if (target.credential === "flag") {
     if (target.hasEnvToken) return "Replace --token, or omit it to use BUZZ_TOKEN";
     if (target.hasSavedSession) return "Replace --token, or omit it to use the saved session";
@@ -185,8 +193,22 @@ export function missingCredential(target: Target): CliError {
   );
 }
 
+function sessionRecovery(target: Target): string {
+  if (runningInCi()) return "This needs a signed-in session, so run it outside CI";
+  const steps = [
+    target.credential === "flag" ? "omit --token" : undefined,
+    target.hasEnvToken ? "unset BUZZ_TOKEN" : undefined,
+  ].filter(Boolean);
+  if (!steps.length) return `Run: ${loginCommand(target)}`;
+  const action = steps.join(" and ");
+  const sentence = action[0].toUpperCase() + action.slice(1);
+  return target.hasSavedSession
+    ? `${sentence} to use the saved session`
+    : `${sentence}, then run: ${loginCommand(target)}`;
+}
+
 export function sessionRequired(target: Target, message: string): CliError {
-  return new CliError(message, credentialRecovery(target), "SESSION_REQUIRED");
+  return new CliError(message, sessionRecovery(target), "SESSION_REQUIRED");
 }
 
 export function targetSummary(target: Target): string {

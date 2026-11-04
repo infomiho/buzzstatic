@@ -5,13 +5,16 @@ import {
   authHeaders,
   isRecord,
   requestJson,
+  sessionOnly,
   CliError,
   type CliOptions,
 } from "../client.js";
 import {
   CREDENTIAL_LABELS,
   SELECTION_LABELS,
+  loginCommand,
   resolveTarget,
+  runningInCi,
   serverLabel,
   serverSelector,
   type Target,
@@ -99,14 +102,19 @@ function defaultServerLines(config: Config, target: Target): string[] {
   return [`Default server: ${serverLabel({ url: config.server, name })}`];
 }
 
-function remainingTokenLines(target: Target): string[] {
-  if (target.credential === "env") {
-    return ["BUZZ_TOKEN is still set, so commands in this environment keep using it."];
-  }
+function remainingTokenLines(target: Target, after: "login" | "logout"): string[] {
+  const lines: string[] = [];
   if (target.credential === "flag") {
-    return ["--token applies only to commands that include it."];
+    lines.push(
+      after === "login"
+        ? "--token overrides the saved session only for commands that include it."
+        : "The --token value was not revoked and still works when supplied."
+    );
   }
-  return [];
+  if (target.hasEnvToken) {
+    lines.push("BUZZ_TOKEN is still set, so commands in this environment keep using it.");
+  }
+  return lines;
 }
 
 function loginInCi(): CliError {
@@ -122,8 +130,10 @@ interface LoginOptions {
 }
 
 export async function login(options: LoginOptions = {}, cliOptions: CliOptions = {}) {
-  if (process.env.CI) throw loginInCi();
+  if (runningInCi()) throw loginInCi();
   const target = resolveTarget(cliOptions);
+  console.error(`Signing in to ${serverLabel(target)}`);
+  console.error(`Selected by: ${SELECTION_LABELS[target.source]}\n`);
 
   await checkServerCompatibility(target);
 
@@ -137,13 +147,11 @@ export async function login(options: LoginOptions = {}, cliOptions: CliOptions =
     { target, auth: "none", errors: { fallback: "Failed to start login" } }
   );
 
-  console.error(`Signing in to ${serverLabel(target)}`);
-  console.error(`Selected by: ${SELECTION_LABELS[target.source]}\n`);
   console.error(`Open: ${start.verification_uri}`);
   console.error(`Enter code: ${start.user_code}`);
   console.error("Check the account in your browser, then approve sign-in.");
   console.error("Waiting for approval...");
-  if (options.browser !== false && process.stdout.isTTY) {
+  if (options.browser !== false && process.stderr.isTTY) {
     openInBrowser(start.verification_uri);
   }
 
@@ -169,7 +177,7 @@ export async function login(options: LoginOptions = {}, cliOptions: CliOptions =
     }
 
     if (poll.error) {
-      throw new CliError(poll.error, `Try again: buzz login --server ${serverSelector(target)}`);
+      throw new CliError(poll.error, `Try again: ${loginCommand(target)}`, "LOGIN_FAILED");
     }
 
     if (poll.status === "complete" && poll.token && poll.user) {
@@ -180,14 +188,14 @@ export async function login(options: LoginOptions = {}, cliOptions: CliOptions =
         [
           `Signed in to ${serverLabel(target)} as @${poll.user.login}.`,
           ...defaultServerLines(config, target),
-          ...remainingTokenLines(target),
+          ...remainingTokenLines(target, "login"),
         ].join("\n")
       );
       return;
     }
   }
 
-  throw new CliError("Login timed out", `Try again: buzz login --server ${serverSelector(target)}`);
+  throw new CliError("Login timed out", `Try again: ${loginCommand(target)}`, "LOGIN_TIMED_OUT");
 }
 
 async function revokeSession(target: Target, token: string): Promise<boolean> {
@@ -211,7 +219,7 @@ export async function logout(cliOptions: CliOptions = {}) {
   const token = getCredential(config, target.url);
 
   if (!token) {
-    console.log([`No saved session for ${server}.`, ...remainingTokenLines(target)].join("\n"));
+    console.log([`No saved session for ${server}.`, ...remainingTokenLines(target, "logout")].join("\n"));
     return;
   }
 
@@ -222,7 +230,7 @@ export async function logout(cliOptions: CliOptions = {}) {
   const result = revoked
     ? `Signed out of ${server}. Removed the saved session.`
     : `Removed the saved session for ${server}, but could not confirm it was revoked on the server.`;
-  console.log([result, ...remainingTokenLines(target)].join("\n"));
+  console.log([result, ...remainingTokenLines(target, "logout")].join("\n"));
 }
 
 interface WhoamiOptions {
@@ -241,7 +249,7 @@ async function verifiedAccount(target: Target): Promise<AuthUser> {
     "/auth/me",
     { guard: isUser, invalid: "Server returned an invalid user response" },
     {},
-    { target }
+    { target, errors: { forbidden: sessionOnly("verify an account") } }
   );
 }
 

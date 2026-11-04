@@ -131,7 +131,53 @@ describe("logout", () => {
   });
 });
 
+describe("token notes", () => {
+  it("reports both --token and a remaining BUZZ_TOKEN after logout", async () => {
+    vi.stubEnv("BUZZ_TOKEN", "env-token");
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(async () => new Response(null, { status: 204 })));
+
+    await logout({ server: "work", token: "flag-token" });
+
+    expect(output(stdout)).toContain("The --token value was not revoked");
+    expect(output(stdout)).toContain("BUZZ_TOKEN is still set");
+  });
+});
+
 describe("whoami", () => {
+  it("explains that a deployment token cannot verify an account", async () => {
+    vi.stubEnv("BUZZ_TOKEN", "deploy");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async () => json({ detail: "Deploy tokens cannot perform this operation" }, 403))
+    );
+
+    await whoami({ json: true }, { server: "work" });
+
+    expect(JSON.parse(output(stdout)).error).toMatchObject({
+      code: "SESSION_REQUIRED",
+      tip: "Unset BUZZ_TOKEN to use the saved session",
+    });
+  });
+
+  it("keeps the session on a connection failure", async () => {
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(async () => { throw new Error("offline"); }));
+
+    await whoami({ json: true }, { server: "work" });
+
+    expect(JSON.parse(output(stdout)).error.code).toBe("CONNECTION_FAILED");
+    expect(loadConfig().credentials?.[WORK]).toBe("old-work-session");
+  });
+
+  it("reports an unknown server with no selected server", async () => {
+    await whoami({ json: true }, { server: "nope" });
+
+    expect(JSON.parse(output(stdout))).toMatchObject({
+      selected_server: null,
+      authentication: { source: "none" },
+      error: { code: "UNKNOWN_SERVER" },
+    });
+  });
+
   it("names the server and the freshly verified account", async () => {
     const fetchFn = vi.fn<typeof fetch>(async () => json({ login: "me-work", name: "Me" }));
     vi.stubGlobal("fetch", fetchFn);

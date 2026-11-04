@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { rejectedCredential, resolveTarget } from "./target.js";
+import { rejectedCredential, resolveTarget, runningInCi, sessionRequired } from "./target.js";
 import type { Config } from "./credentials.js";
 
 const config: Config = {
@@ -102,5 +102,34 @@ describe("credential recovery", () => {
       message: "Your saved session for work (https://work.example.com) was rejected",
       tip: "Run: buzz login --server work",
     });
+  });
+});
+
+describe("session-only operations", () => {
+  it.each([
+    [{ BUZZ_TOKEN: "deploy" }, {}, "https://new.example.com", "Unset BUZZ_TOKEN, then run: buzz login --server https://new.example.com"],
+    [{ BUZZ_TOKEN: "deploy" }, {}, "https://work.example.com", "Unset BUZZ_TOKEN to use the saved session"],
+    [{ BUZZ_TOKEN: "deploy" }, { token: "t" }, "https://new.example.com", "Omit --token and unset BUZZ_TOKEN, then run: buzz login --server https://new.example.com"],
+  ])("recovers from env %j and flags %j on %s", (env, flags, server, tip) => {
+    for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
+
+    expect(sessionRequired(resolveTarget({ server, ...flags }, config), "x").tip).toBe(tip);
+  });
+
+  it("does not suggest browser sign-in in CI", () => {
+    vi.stubEnv("CI", "true");
+    vi.stubEnv("BUZZ_TOKEN", "deploy");
+    const target = resolveTarget({ server: "https://work.example.com" }, config);
+
+    expect(rejectedCredential(target).tip).toBe(
+      "Update the BUZZ_TOKEN secret with a valid deployment token for https://work.example.com"
+    );
+    expect(sessionRequired(target, "x").tip).not.toContain("buzz login");
+  });
+
+  it("treats CI=false as a local terminal", () => {
+    vi.stubEnv("CI", "false");
+
+    expect(runningInCi()).toBe(false);
   });
 });
