@@ -59,7 +59,7 @@ export async function createZipBuffer(
 }
 
 function isCI(): boolean {
-  return !process.stdout.isTTY || !!process.env.CI;
+  return !process.stderr.isTTY || !!process.env.CI;
 }
 
 export function createProgressBar(task: string): cliProgress.SingleBar {
@@ -85,21 +85,21 @@ export function createSpinner(message: string): { start: () => void; stop: (fina
   return {
     start: () => {
       if (ci) {
-        console.log(`${message}...`);
+        console.error(`${message}...`);
         return;
       }
-      process.stdout.write(`${frames[0]} ${message}`);
+      process.stderr.write(`${frames[0]} ${message}`);
       interval = setInterval(() => {
         frameIndex = (frameIndex + 1) % frames.length;
-        process.stdout.write(`\r${frames[frameIndex]} ${message}`);
+        process.stderr.write(`\r${frames[frameIndex]} ${message}`);
       }, 80);
     },
     stop: (finalMessage: string) => {
       if (interval) {
         clearInterval(interval);
-        process.stdout.write(`\r\x1b[K${finalMessage}\n`);
+        process.stderr.write(`\r\x1b[K${finalMessage}\n`);
       } else if (ci) {
-        console.log(finalMessage);
+        console.error(finalMessage);
       }
     },
   };

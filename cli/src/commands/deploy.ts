@@ -2,7 +2,7 @@ import { Command } from "commander";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { CliError, type CliOptions } from "../client.js";
-import { missingCredential, resolveTarget } from "../target.js";
+import { missingCredential, resolveTarget, serverLabel, targetSummary } from "../target.js";
 import { checkServerCompatibility } from "../compat.js";
 import { createProgressBar, createSpinner, formatSize } from "../lib.js";
 import {
@@ -25,6 +25,9 @@ export async function deploy(
   await checkServerCompatibility(target);
 
   siteName = resolveSiteName(process.cwd(), directory, siteName);
+  const site = siteName ? `'${siteName}'` : "a new site (name assigned by the server)";
+  console.error(`Deploying ${site} to ${serverLabel(target)}`);
+  console.error(targetSummary(target));
 
   const progressBar = createProgressBar("Zipping");
   let progressStarted = false;
@@ -46,7 +49,7 @@ export async function deploy(
     }
   }
 
-  console.log(`Compressed to ${formatSize(zipBuffer.length)}`);
+  console.error(`Compressed to ${formatSize(zipBuffer.length)}`);
 
   const uploadSpinner = createSpinner("Uploading");
   uploadSpinner.start();

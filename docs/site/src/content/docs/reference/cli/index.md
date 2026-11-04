@@ -536,6 +536,13 @@ Options:
   --json                      Print the overview as JSON
   -h, --help                  display help for command
 
+Global Options:
+  -V, --version               output the version number
+  -s, --server <name-or-url>  Saved server name or URL for this command
+                              (overrides BUZZ_SERVER and the saved default)
+  -t, --token <token>         Session or deployment token for this command
+                              (overrides BUZZ_TOKEN and the saved session)
+
 Commands:
   add [options] <name> <url>  Save a server under a name, without signing in
   default <name-or-url>       Change the saved default server

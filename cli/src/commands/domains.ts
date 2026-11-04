@@ -1,6 +1,6 @@
 import { Command } from "commander";
 import { CliError, type CliOptions, type Target } from "../client.js";
-import { resolveTarget } from "../target.js";
+import { announcedTarget, serverLabel } from "../target.js";
 import { confirm } from "../prompts.js";
 import {
   cancelDomainTransition,
@@ -41,7 +41,7 @@ export async function listDomains(
   siteName?: string,
   cliOptions: CliOptions = {}
 ): Promise<void> {
-  const target = resolveTarget(cliOptions);
+  const target = announcedTarget(cliOptions);
   const capability = await getDomainCapability(target);
   printCapability(capability);
   const claims = siteName
@@ -59,7 +59,7 @@ export async function addDomain(
   hostname: string,
   cliOptions: CliOptions = {}
 ): Promise<void> {
-  const target = resolveTarget(cliOptions);
+  const target = announcedTarget(cliOptions);
   const capability = await getDomainCapability(target);
   if (capability.automatic?.ready !== true) {
     throw new CliError(
@@ -108,20 +108,20 @@ export const retryTransition = (
   siteName: string,
   hostname: string,
   cliOptions: CliOptions = {}
-) => updateTransition("retry", siteName, hostname, resolveTarget(cliOptions));
+) => updateTransition("retry", siteName, hostname, announcedTarget(cliOptions));
 
 export const cancelTransition = (
   siteName: string,
   hostname: string,
   cliOptions: CliOptions = {}
-) => updateTransition("cancel", siteName, hostname, resolveTarget(cliOptions));
+) => updateTransition("cancel", siteName, hostname, announcedTarget(cliOptions));
 
 export async function checkDomain(
   siteName: string,
   hostname: string,
   cliOptions: CliOptions = {}
 ): Promise<void> {
-  const target = resolveTarget(cliOptions);
+  const target = announcedTarget(cliOptions);
   const capability = await getDomainCapability(target);
   requireControlReady(capability);
   const current = resolveDomainClaim(await getDomainClaims(siteName, target), hostname);
@@ -143,7 +143,7 @@ export async function removeDomain(
   cliOptions: CliOptions = {},
   dependencies: RemoveDependencies = { confirm }
 ): Promise<void> {
-  const target = resolveTarget(cliOptions);
+  const target = announcedTarget(cliOptions);
   const capability = await getDomainCapability(target);
   if (capability.status === "disabled") requireReady(capability);
   const claim = resolveDomainClaim(await getDomainClaims(siteName, target), hostname);
@@ -158,7 +158,7 @@ export async function removeDomain(
   if (
     !options.yes &&
     !(await dependencies.confirm(
-      `Remove custom domain '${claim.hostname}' from site '${siteName}'?\n` +
+      `Remove custom domain '${claim.hostname}' from site '${siteName}' on ${serverLabel(target)}?\n` +
         "Buzz will stop tracking ownership and routing, but will not change DNS records."
     ))
   ) {

@@ -8,7 +8,7 @@ import {
   type CliOptions,
   type Target,
 } from "../client.js";
-import { resolveTarget, sessionRequired } from "../target.js";
+import { announcedTarget, serverLabel, sessionRequired } from "../target.js";
 import { confirm } from "../prompts.js";
 import { resolveCurrentSite } from "../site.js";
 
@@ -69,7 +69,7 @@ export async function accessStatus(
   cliOptions: CliOptions = {}
 ): Promise<void> {
   const site = resolveCurrentSite(options.site);
-  await reportVisibility(site, resolveTarget(cliOptions), {}, "Could not get site access");
+  await reportVisibility(site, announcedTarget(cliOptions), {}, "Could not get site access");
 }
 
 export async function makePrivate(
@@ -79,7 +79,7 @@ export async function makePrivate(
   const site = resolveCurrentSite(options.site);
   await reportVisibility(
     site,
-    resolveTarget(cliOptions),
+    announcedTarget(cliOptions),
     { method: "PUT" },
     "Could not make the site private"
   );
@@ -90,9 +90,9 @@ export async function makePublic(
   cliOptions: CliOptions = {},
   dependencies: PublicDependencies = { confirm }
 ): Promise<void> {
-  const target = resolveTarget(cliOptions);
+  const target = announcedTarget(cliOptions);
   const site = resolveCurrentSite(options.site);
-  if (!options.yes && !(await dependencies.confirm(`Make '${site}' public?`))) {
+  if (!options.yes && !(await dependencies.confirm(`Make '${site}' public on ${serverLabel(target)}?`))) {
     console.log("Aborted.");
     return;
   }

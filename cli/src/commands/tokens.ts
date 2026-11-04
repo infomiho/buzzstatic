@@ -5,7 +5,7 @@ import {
   requestJson,
   type CliOptions,
 } from "../client.js";
-import { resolveTarget } from "../target.js";
+import { announcedTarget } from "../target.js";
 
 interface DeploymentToken {
   id: string;
@@ -39,7 +39,7 @@ function isCreatedToken(value: unknown): value is CreatedToken {
 }
 
 export async function listTokens(cliOptions: CliOptions = {}) {
-  const target = resolveTarget(cliOptions);
+  const target = announcedTarget(cliOptions);
   const tokens = await requestJson(
     "/tokens",
     {
@@ -73,7 +73,7 @@ export async function createToken(
   cmdOptions: { name?: string },
   cliOptions: CliOptions = {}
 ) {
-  const target = resolveTarget(cliOptions);
+  const target = announcedTarget(cliOptions);
   const data = await requestJson(
     "/tokens",
     {
@@ -103,7 +103,7 @@ export async function deleteToken(
   tokenId: string,
   cliOptions: CliOptions = {}
 ) {
-  const target = resolveTarget(cliOptions);
+  const target = announcedTarget(cliOptions);
   await requestEmpty(
     `/tokens/${tokenId}`,
     [204],

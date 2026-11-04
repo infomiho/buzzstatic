@@ -95,6 +95,11 @@ function selector(
   return undefined;
 }
 
+function resolveDefault(url: string, config: Config): Server {
+  const normalized = normalizeServerUrl(url);
+  return { url: normalized, name: serverNameFor(config, normalized) };
+}
+
 function withSource(error: unknown, source: SelectionSource): unknown {
   if (!(error instanceof CliError)) return error;
   return new CliError(`${error.message} (from ${SELECTION_LABELS[source]})`, error.tip, error.code);
@@ -104,7 +109,8 @@ export function selectServer(cliOptions: CliOptions, config: Config): Selection 
   const chosen = selector(cliOptions, config);
   if (!chosen) return undefined;
   try {
-    return { ...resolveSelector(chosen.value, config), source: chosen.source };
+    const resolve = chosen.source === "default" ? resolveDefault : resolveSelector;
+    return { ...resolve(chosen.value, config), source: chosen.source };
   } catch (error) {
     throw withSource(error, chosen.source);
   }
@@ -181,4 +187,14 @@ export function missingCredential(target: Target): CliError {
 
 export function sessionRequired(target: Target, message: string): CliError {
   return new CliError(message, credentialRecovery(target), "SESSION_REQUIRED");
+}
+
+export function targetSummary(target: Target): string {
+  return `Selected by: ${SELECTION_LABELS[target.source]} · Authentication: ${CREDENTIAL_LABELS[target.credential]}`;
+}
+
+export function announcedTarget(cliOptions: CliOptions = {}): Target {
+  const target = resolveTarget(cliOptions);
+  console.error(`Server: ${serverLabel(target)} · ${targetSummary(target)}`);
+  return target;
 }

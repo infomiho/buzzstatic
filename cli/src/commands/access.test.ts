@@ -73,7 +73,7 @@ describe("access commands", () => {
 
     await makePublic({ site: "my-site" }, cliOptions, { confirm });
 
-    expect(confirm).toHaveBeenCalledWith("Make 'my-site' public?");
+    expect(confirm).toHaveBeenCalledWith("Make 'my-site' public on https://buzz.example.com?");
     expect(fetchMock).not.toHaveBeenCalled();
     expect(console.log).toHaveBeenCalledWith("Aborted.");
   });

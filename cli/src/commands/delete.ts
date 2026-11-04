@@ -1,6 +1,6 @@
 import { Command } from "commander";
 import { requestEmpty, type CliOptions } from "../client.js";
-import { resolveTarget } from "../target.js";
+import { announcedTarget, serverLabel } from "../target.js";
 import { confirm } from "../prompts.js";
 
 export async function deleteSite(
@@ -8,9 +8,9 @@ export async function deleteSite(
   options: { yes?: boolean },
   cliOptions: CliOptions = {}
 ) {
-  const target = resolveTarget(cliOptions);
+  const target = announcedTarget(cliOptions);
   if (!options.yes) {
-    const confirmed = await confirm(`Delete site '${subdomain}'?`);
+    const confirmed = await confirm(`Delete site '${subdomain}' on ${serverLabel(target)}?`);
     if (!confirmed) {
       console.log("Aborted.");
       return;

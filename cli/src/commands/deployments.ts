@@ -1,6 +1,6 @@
 import { Command } from "commander";
 import { CliError, isRecord, requestJson, type CliOptions } from "../client.js";
-import { resolveTarget } from "../target.js";
+import { announcedTarget } from "../target.js";
 import { resolveCurrentSite } from "../site.js";
 
 interface SiteOption {
@@ -44,7 +44,7 @@ export async function deployments(
   options: SiteOption,
   cliOptions: CliOptions = {}
 ): Promise<void> {
-  const target = resolveTarget(cliOptions);
+  const target = announcedTarget(cliOptions);
   const site = resolveCurrentSite(options.site);
   const rows = await requestJson(
     deploymentPath(site),
@@ -82,7 +82,7 @@ export async function useDeployment(
   if (!Number.isInteger(deploymentNumber) || deploymentNumber < 1) {
     throw new CliError("Deployment number must be a positive integer");
   }
-  const target = resolveTarget(cliOptions);
+  const target = announcedTarget(cliOptions);
   const site = resolveCurrentSite(options.site);
   await requestJson(
     `${deploymentPath(site)}/${deploymentNumber}/activate`,
