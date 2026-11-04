@@ -102,7 +102,8 @@ function parseConfig(raw: Record<string, unknown>): Config {
   if (typeof raw.servers === "object" && raw.servers !== null) {
     for (const [name, server] of Object.entries(raw.servers)) {
       const url = typeof server === "string" ? tryNormalize(server) : undefined;
-      if (isServerName(name) && url) {
+      const urlTaken = url !== undefined && serverNameFor(config, url) !== undefined;
+      if (isServerName(name) && url && !urlTaken) {
         config.servers = { ...config.servers, [name]: url };
       }
     }

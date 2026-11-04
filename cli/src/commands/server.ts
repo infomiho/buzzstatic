@@ -148,12 +148,11 @@ const ADD_SERVER = "Add a server: buzz server add <name> <url> --default";
 
 function exampleLines(overview: Overview): string[] {
   const servers = overview.servers ?? [];
-  const other =
-    servers.find((server) => server.url !== overview.selected_server?.url) ??
-    (servers.length === 1 ? servers[0] : undefined);
+  const selectedUrl = overview.selected_server?.url;
+  const other = servers.find((server) => server.url !== selectedUrl) ?? servers[0];
   if (!other) return [ADD_SERVER];
   const selector = serverSelector(other);
-  const isOther = other.url !== overview.selected_server?.url;
+  const isOther = other.url !== selectedUrl;
   return [
     isOther ? "Use another server for one command:" : "Target this server explicitly for one command:",
     `  buzz deploy ./dist --site my-site --server ${selector}`,
@@ -190,7 +189,7 @@ export function showServers(options: { json?: boolean }, cliOptions: CliOptions 
   if (error) throw new CliError(error.message, error.tip, error.code);
 }
 
-function shellOverrideNote(config: Config, server: Server): string[] {
+function shellOverrideNote(config: Config, server: Server, defaultChanged: boolean): string[] {
   if (!process.env.BUZZ_SERVER?.trim()) return [];
   let selection: Selection | undefined;
   try {
@@ -199,7 +198,7 @@ function shellOverrideNote(config: Config, server: Server): string[] {
     const reason = error instanceof Error ? error.message : String(error);
     return [`BUZZ_SERVER is set but does not resolve: ${reason}`];
   }
-  if (!selection || selection.url === server.url) return [];
+  if (!defaultChanged || !selection || selection.url === server.url) return [];
   return [
     `Commands in this shell still target ${serverLabel(selection)} because BUZZ_SERVER is set.`,
     `Unset BUZZ_SERVER or pass --server ${serverSelector(server)}.`,
@@ -246,7 +245,7 @@ export function addServer(name: string, rawUrl: string, options: { default?: boo
   const lines = [`${added ? "Saved" : "Already saved:"} server ${serverLabel(server)}.`];
   if (options.default) lines.push(`Default server: ${serverLabel(server)}`);
   if (!getCredential(config, url)) lines.push(`Sign in: buzz login --server ${name}`);
-  console.log([...lines, ...shellOverrideNote(config, server)].join("\n"));
+  console.log([...lines, ...shellOverrideNote(config, server, !!options.default)].join("\n"));
 }
 
 export function setDefaultServer(selector: string): void {
@@ -254,7 +253,8 @@ export function setDefaultServer(selector: string): void {
   const server = resolveSelector(selector, config);
   config.server = server.url;
   saveConfig(config);
-  console.log([`Default server: ${serverLabel(server)}`, ...shellOverrideNote(config, server)].join("\n"));
+  const lines = [`Default server: ${serverLabel(server)}`, ...shellOverrideNote(config, server, true)];
+  console.log(lines.join("\n"));
 }
 
 export function removeServer(name: string): void {
@@ -272,7 +272,7 @@ export function removeServer(name: string): void {
   if (getCredential(config, url)) {
     lines.push(`Saved session retained. Sign out with: buzz logout --server ${url}`);
   }
-  console.log(lines.join("\n"));
+  console.log([...lines, ...shellOverrideNote(config, { url }, false)].join("\n"));
 }
 
 export function registerServerCommand(program: Command): void {
@@ -280,22 +280,20 @@ export function registerServerCommand(program: Command): void {
     .command("server")
     .description("Show saved servers, the default, and which one commands target")
     .option("--json", "Print the overview as JSON")
-    .action((options: { json?: boolean }) => showServers(options, program.opts()))
-    // Subcommands only edit local config, so --json and --server do not apply to them.
-    .configureHelp({ showGlobalOptions: false });
-  server
-    .command("add <name> <url>")
+    .action((options: { json?: boolean }) => showServers(options, program.opts()));
+  // These only edit local config, so --json, --server, and --token do not apply to them.
+  const localCommand = (nameAndArgs: string) =>
+    server.command(nameAndArgs).configureHelp({ showGlobalOptions: false });
+  localCommand("add <name> <url>")
     .description("Save a server under a name, without signing in")
     .option("--default", "Also make it the default server")
     .action((name: string, url: string, options: { default?: boolean }) =>
       addServer(name, url, options)
     );
-  server
-    .command("default <name-or-url>")
+  localCommand("default <name-or-url>")
     .description("Change the saved default server")
     .action(setDefaultServer);
-  server
-    .command("remove <name>")
+  localCommand("remove <name>")
     .description("Remove a server name, keeping its session and default")
     .action(removeServer);
 }

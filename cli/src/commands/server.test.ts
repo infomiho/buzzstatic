@@ -155,6 +155,26 @@ describe("server names and default", () => {
     );
   });
 
+  it("warns when removing the name BUZZ_SERVER uses", () => {
+    saveConfig({ server: PERSONAL, servers: { work: WORK } });
+    vi.stubEnv("BUZZ_SERVER", "work");
+    const stdout = captureStdout();
+
+    removeServer("work");
+
+    expect(stdout()).toContain("BUZZ_SERVER is set but does not resolve");
+  });
+
+  it("does not tell the user to unset BUZZ_SERVER after a plain add", () => {
+    saveConfig({ server: PERSONAL, servers: { personal: PERSONAL } });
+    vi.stubEnv("BUZZ_SERVER", "personal");
+    const stdout = captureStdout();
+
+    addServer("work", WORK, {});
+
+    expect(stdout()).not.toContain("Unset BUZZ_SERVER");
+  });
+
   it("keeps the default URL and session when removing a name", () => {
     saveConfig({ server: WORK, servers: { work: WORK }, credentials: { [WORK]: "w" } });
     const stdout = captureStdout();
