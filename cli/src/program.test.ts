@@ -59,4 +59,14 @@ describe("createProgram", () => {
     expect(help).toContain("Session or deployment token");
     expect(help).toContain("deploy [options] <directory>");
   });
+
+  it("points to server discovery from root help", () => {
+    let help = "";
+    const program = createProgram().configureOutput({ writeOut: (text) => (help += text) });
+
+    program.outputHelp();
+
+    expect(help).toContain("Inspect servers and the current target:   buzz server");
+    expect(help).toContain("buzz login --server <name-or-url>");
+  });
 });

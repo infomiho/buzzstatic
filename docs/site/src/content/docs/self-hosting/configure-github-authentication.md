@@ -50,11 +50,11 @@ Restart or redeploy Buzz after changing either variable. Buzz reads environment 
 2. Start the GitHub sign-in.
 3. Authorize the OAuth app on GitHub.
 4. Confirm that GitHub returns you to the Buzz dashboard.
-5. Configure the CLI's server URL and run:
+5. Sign the CLI in to your server:
 
    ```bash
-   buzz login
-   buzz whoami
+   buzz login --server https://buzz.example.com
+   buzz whoami --server https://buzz.example.com
    ```
 
    `buzz login` opens Buzz in a browser for approval. Sign in through the dashboard if needed, enter the code shown by the CLI, then run `buzz whoami` to confirm the GitHub account.

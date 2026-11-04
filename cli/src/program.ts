@@ -20,5 +20,16 @@ export function createProgram(): Command {
     );
 
   registerCommands(program);
+  program.addHelpText(
+    "after",
+    [
+      "",
+      "Servers:",
+      "  Inspect servers and the current target:   buzz server",
+      "  Use another server for one command:       buzz <command> --server <name-or-url>",
+      "  Change the saved default:                 buzz server default <name-or-url>",
+      "  Sign in to a specific server:             buzz login --server <name-or-url>",
+    ].join("\n")
+  );
   return program;
 }
