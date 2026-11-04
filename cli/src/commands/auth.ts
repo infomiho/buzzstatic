@@ -20,6 +20,7 @@ import {
   type Target,
 } from "../target.js";
 import { checkServerCompatibility } from "../compat.js";
+import { errorJson, type ErrorJson } from "../errors.js";
 import {
   clearCredential,
   getCredential,
@@ -237,13 +238,6 @@ interface WhoamiOptions {
   json?: boolean;
 }
 
-function jsonError(error: unknown) {
-  if (error instanceof CliError) {
-    return { code: error.code ?? "REQUEST_FAILED", message: error.message, tip: error.tip ?? null };
-  }
-  return { code: "REQUEST_FAILED", message: String(error), tip: null };
-}
-
 async function verifiedAccount(target: Target): Promise<AuthUser> {
   return requestJson(
     "/auth/me",
@@ -256,13 +250,13 @@ async function verifiedAccount(target: Target): Promise<AuthUser> {
 async function whoamiJson(cliOptions: CliOptions): Promise<void> {
   let target: Target | undefined;
   let account: { login: string; name: string | null } | null = null;
-  let error: ReturnType<typeof jsonError> | null = null;
+  let error: ErrorJson | null = null;
   try {
     target = resolveTarget(cliOptions);
     const user = await verifiedAccount(target);
     account = { login: user.login, name: user.name ?? null };
   } catch (caught) {
-    error = jsonError(caught);
+    error = errorJson(caught);
     process.exitCode = 1;
   }
   const selected = target

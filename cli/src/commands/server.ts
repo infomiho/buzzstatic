@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import { CliError } from "../errors.js";
+import { CliError, errorJson, type ErrorJson } from "../errors.js";
 import {
   CONFIG_PATH,
   getCredential,
@@ -31,26 +31,13 @@ interface ServerEntry {
   session_saved: boolean;
 }
 
-interface OverviewError {
-  code: string;
-  message: string;
-  tip?: string;
-}
-
 export interface Overview {
   schema_version: 1;
   default_server: { name: string | null; url: string } | null;
   selected_server: { name: string | null; url: string; source: Selection["source"] } | null;
   authentication: { source: CredentialSource };
   servers: ServerEntry[] | null;
-  error: OverviewError | null;
-}
-
-function toError(error: unknown): OverviewError {
-  if (error instanceof CliError) {
-    return { code: error.code ?? "ERROR", message: error.message, tip: error.tip };
-  }
-  return { code: "ERROR", message: error instanceof Error ? error.message : String(error) };
+  error: ErrorJson | null;
 }
 
 function knownServers(config: Config): ServerEntry[] {
@@ -78,7 +65,7 @@ export function inspectServers(cliOptions: CliOptions = {}): Overview {
   try {
     config = loadConfig();
   } catch (error) {
-    return { ...overview, error: toError(error) };
+    return { ...overview, error: errorJson(error) };
   }
 
   overview.servers = knownServers(config);
@@ -93,7 +80,7 @@ export function inspectServers(cliOptions: CliOptions = {}): Overview {
       overview.authentication.source = withCredential(selection, cliOptions, config).credential;
     }
   } catch (error) {
-    overview.error = toError(error);
+    overview.error = errorJson(error);
   }
   return overview;
 }
@@ -186,7 +173,7 @@ export function showServers(options: { json?: boolean }, cliOptions: CliOptions 
   }
   const { error } = overview;
   if (overview.servers !== null) console.log(formatOverview(overview));
-  if (error) throw new CliError(error.message, error.tip, error.code);
+  if (error) throw new CliError(error.message, error.tip ?? undefined, error.code);
 }
 
 function shellOverrideNote(config: Config, server: Server, defaultChanged: boolean): string[] {
