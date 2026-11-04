@@ -276,8 +276,11 @@ describe("domain commands", () => {
 
     await removeDomain("my-site", "www.example.com", {}, cliOptions, { confirm });
 
-    expect(confirm).toHaveBeenCalledOnce();
+    expect(confirm).toHaveBeenCalledWith(
+      expect.stringContaining("from site 'my-site' on https://buzz.example.com?")
+    );
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.every(([url]) => String(url).startsWith("https://buzz.example.com/"))).toBe(true);
     expect(console.log).toHaveBeenCalledWith("Aborted.");
   });
 

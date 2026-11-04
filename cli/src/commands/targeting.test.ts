@@ -63,6 +63,7 @@ describe("one-command server overrides", () => {
     await deploy(join(cwd, "dist"), undefined, { server: "work" });
 
     expect(new Set(requestedOrigins(fetchFn))).toEqual(new Set([WORK]));
+    expect(stderr.mock.invocationCallOrder[0]).toBeLessThan(fetchFn.mock.invocationCallOrder[0]);
     const banner = stderr.mock.calls.map((call: unknown[]) => call.join(" ")).join("\n");
     expect(banner).toContain("Deploying 'demo' to work (https://work.example.com)");
     expect(banner).toContain("Selected by: --server · Authentication: saved session");

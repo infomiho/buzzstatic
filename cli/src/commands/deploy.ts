@@ -22,12 +22,12 @@ export async function deploy(
 
   if (!target.token) throw missingCredential(target);
 
-  await checkServerCompatibility(target);
-
   siteName = resolveSiteName(process.cwd(), directory, siteName);
   const site = siteName ? `'${siteName}'` : "a new site (name assigned by the server)";
   console.error(`Deploying ${site} to ${serverLabel(target)}`);
   console.error(targetSummary(target));
+
+  await checkServerCompatibility(target);
 
   const progressBar = createProgressBar("Zipping");
   let progressStarted = false;
