@@ -11,8 +11,6 @@ from urllib.parse import urlsplit
 
 from .environment import environment_value
 
-LOCAL_CONTROL_ORIGIN = "http://localhost:8080"
-
 
 @dataclass(frozen=True)
 class Settings:
@@ -21,6 +19,7 @@ class Settings:
     deployments_dir: Path
     db_path: Path
     domain: str | None
+    port: int
     dev_mode: bool
     github_client_id: str | None
     github_client_secret: str | None
@@ -50,7 +49,7 @@ class Settings:
     def control_origin(self) -> str:
         """Where the dashboard lives. A configured domain is served over TLS;
         without one, Buzz is running locally. The only place this is decided."""
-        return f"https://{self.domain}" if self.domain else LOCAL_CONTROL_ORIGIN
+        return f"https://{self.domain}" if self.domain else f"http://localhost:{self.port}"
 
     @property
     def control_scheme(self) -> str:
@@ -74,6 +73,7 @@ class Settings:
             deployments_dir=data_dir / "deployments",
             db_path=data_dir / "data.db",
             domain=environment_value("BUZZ_DOMAIN"),
+            port=environment_value("BUZZ_PORT"),
             dev_mode=False,
             github_client_id=environment_value("GITHUB_CLIENT_ID"),
             github_client_secret=environment_value("GITHUB_CLIENT_SECRET"),

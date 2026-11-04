@@ -66,13 +66,12 @@ def main() -> None:
     args = parser.parse_args()
 
     settings = Settings.from_environment()
-    overrides: dict[str, object] = {}
+    overrides: dict[str, object] = {"port": args.port}
     if args.domain:
         overrides["domain"] = args.domain
     if args.dev:
         overrides["dev_mode"] = True
-    if overrides:
-        settings = dataclasses.replace(settings, **overrides)
+    settings = dataclasses.replace(settings, **overrides)
     if not settings.dev_mode:
         error = domain_error(settings.domain)
         if error:
@@ -109,7 +108,9 @@ def main() -> None:
     if args.reload:
         # Reload spawns a fresh interpreter that imports the factory directly, so
         # command-line overrides cannot travel through the app instance. Propagate
-        # --domain through the environment; --dev is not honored under --reload.
+        # --domain and --port through the environment; --dev is not honored under
+        # --reload.
+        os.environ["BUZZ_PORT"] = str(args.port)
         if args.domain:
             os.environ["BUZZ_DOMAIN"] = args.domain
         uvicorn.run(
