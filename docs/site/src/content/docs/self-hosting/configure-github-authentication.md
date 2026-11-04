@@ -57,7 +57,7 @@ Restart or redeploy Buzz after changing either variable. Buzz reads environment 
    buzz whoami --server https://buzz.example.com
    ```
 
-   `buzz login` opens Buzz in a browser for approval. Sign in through the dashboard if needed, enter the code shown by the CLI, then run `buzz whoami` to confirm the GitHub account.
+   `buzz login` opens Buzz in a browser for approval. Sign in through the dashboard if needed, enter the code shown by the CLI, then run `buzz whoami --server https://buzz.example.com` to confirm the GitHub account.
 
 By default any GitHub user who can reach the server can sign in and deploy sites. Set `BUZZ_ALLOW_REGISTRATION=false` to stop new sign-ups, or `BUZZ_ALLOWED_GITHUB_USERS` to allow only specific GitHub usernames. Review [Security](../security/) before exposing Buzz to users you don't administer.
 

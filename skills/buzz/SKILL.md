@@ -9,7 +9,8 @@ Requires Node.js 22 or later. Check with `node --version` and `buzz --version` b
 
 ## Pick The Server
 
-1. Run `buzz server --json`. It reads local state only and returns `default_server`, `selected_server` (with `source`: `flag`, `env`, or `default`), `authentication.source`, the saved `servers`, and `error`. If the command is unknown, the CLI is older: use `buzz config` to read the server and target it by URL only.
+1. Run `buzz server --json`. It reads local state only and returns `default_server`, `selected_server` (with `source`: `flag`, `env`, or `default`), `authentication.source`, the saved `servers`, and `error`. If `error` is set, report its message and tip to the user and don't fall back to another server.
+   - If the CLI says `unknown command 'server'`, it is an older version. Read the server from `buzz config`, and ask the user for the URL if none is shown. Pass `--server <url>` on every command, run `buzz login --server <url>`, and use plain `buzz whoami --server <url>`, because `--no-browser` and `--json` don't exist there.
 2. Use the server the user asked for. Map names like "work" or "personal" to `servers[].name` or a URL. Otherwise use `selected_server`, which already includes a `BUZZ_SERVER` override. Several saved servers alone are no reason to ask. Ask only when nothing is selected or the requested server is not known.
 3. Pass that URL with `--server <url>` on every later command in the task. Don't change the default for a one-off task. `buzz server default` is a separate request.
 
@@ -27,10 +28,10 @@ buzz deploy ./dist --site my-site --server <url>
 
 Deploy the directory that contains `index.html`. Each deployment replaces the whole file set. A successful deployment writes the site name to a local `CNAME` file, which later deployments reuse. The file doesn't record the server, which is why `--server` stays explicit. Report the server and the URL the CLI prints.
 
-Use `buzz deploy ./dist --private` to publish a site that only the owner and invited GitHub users can read.
+Use `buzz deploy ./dist --site my-site --private --server <url>` to publish a site that only the owner and invited GitHub users can read.
 
 Ask before running `buzz delete` or `buzz access public`. Deleting removes the site and making it public exposes every file.
 
-For CI, use a site-scoped deployment token with `BUZZ_SERVER` and `BUZZ_TOKEN`. Never commit tokens or paste them into prompts.
+For CI, set `BUZZ_SERVER` to the full URL and `BUZZ_TOKEN` to a site-scoped deployment token. Never commit tokens or paste them into prompts.
 
 See the [CLI reference](https://buzzstatic.dev/reference/cli/) and [official documentation](https://buzzstatic.dev/).

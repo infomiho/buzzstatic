@@ -72,4 +72,4 @@ Set `BUZZ_SERVER` to the full URL and `BUZZ_TOKEN` to a deployment token, as des
 
 ## The CNAME File Has No Server
 
-The `CNAME` file stores only the site name. If you change the default or the override, the same project deploys to the newly selected server. The banner printed before the upload shows where it is going, but it doesn't stop the deployment. Pass `--server` in project scripts where deploying to the wrong server matters.
+The `CNAME` file stores only the site name. If you change the default or the override, the same project deploys to the newly selected server. The banner printed before the upload shows where it is going, but it doesn't stop the deployment. Pass `--server <url>` with the full URL in project scripts where deploying to the wrong server matters, because names exist only on the machine that saved them.
