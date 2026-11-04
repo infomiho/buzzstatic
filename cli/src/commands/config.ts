@@ -1,32 +1,21 @@
 import { Command } from "commander";
 import { CliError } from "../lib.js";
-import { loadConfig, normalizeServerUrl, saveConfig } from "../credentials.js";
 import type { CliOptions } from "../target.js";
-import { showServers } from "./server.js";
+import { setDefaultServer, showServers } from "./server.js";
 
 export function configCommand(key?: string, value?: string, cliOptions: CliOptions = {}) {
   if (!key) {
     showServers({}, cliOptions);
-    return;
-  }
-
-  if (key === "server" && value) {
-    const config = loadConfig();
-    const server = normalizeServerUrl(value);
-    config.server = server;
-    saveConfig(config);
-    console.log(`Server set to ${server}`);
+  } else if (key === "server" && value) {
+    setDefaultServer(value);
   } else {
-    throw new CliError(
-      "Invalid config command",
-      "Usage: buzz config server <url>"
-    );
+    throw new CliError("Invalid config command", "Usage: buzz config server <name-or-url>");
   }
 }
 
 export function registerConfigCommand(program: Command) {
   program
     .command("config [key] [value]")
-    .description("View or set configuration (server)")
+    .description("Show servers, or set the default with 'config server <url>' (same as 'server default')")
     .action((key?: string, value?: string) => configCommand(key, value, program.opts()));
 }

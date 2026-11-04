@@ -9,9 +9,10 @@ export function createProgram(): Command {
     .name("buzz")
     .description("Deploy static sites to a Buzz server")
     .version(cliVersion)
+    .configureHelp({ showGlobalOptions: true })
     .option(
-      "-s, --server <url>",
-      "Buzz server URL for this command (overrides BUZZ_SERVER and the saved default)"
+      "-s, --server <name-or-url>",
+      "Saved server name or URL for this command (overrides BUZZ_SERVER and the saved default)"
     )
     .option(
       "-t, --token <token>",

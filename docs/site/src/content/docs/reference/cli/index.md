@@ -33,10 +33,13 @@ Use this reference to check command syntax and options. Start with [Deploy Your 
 - [`buzz tokens create`](#buzz-tokens-create): Create a deployment token for a site
 - [`buzz tokens delete`](#buzz-tokens-delete): Delete a deployment token
 - [`buzz server`](#buzz-server): Show saved servers, the default, and which one commands target
+- [`buzz server add`](#buzz-server-add): Save a server under a name, without signing in
+- [`buzz server default`](#buzz-server-default): Change the saved default server
+- [`buzz server remove`](#buzz-server-remove): Remove a server name, keeping its session and default
 - [`buzz login`](#buzz-login): Sign in via your browser
 - [`buzz logout`](#buzz-logout): Sign out and clear the stored session
 - [`buzz whoami`](#buzz-whoami): Show the current signed-in user
-- [`buzz config`](#buzz-config): View or set configuration (server)
+- [`buzz config`](#buzz-config): Show servers, or set the default with 'config server <url>' (same as 'server default')
 
 ## buzz
 
@@ -47,8 +50,8 @@ Deploy static sites to a Buzz server
 
 Options:
   -V, --version                 output the version number
-  -s, --server <url>            Buzz server URL for this command (overrides
-                                BUZZ_SERVER and the saved default)
+  -s, --server <name-or-url>    Saved server name or URL for this command
+                                (overrides BUZZ_SERVER and the saved default)
   -t, --token <token>           Session or deployment token for this command
                                 (overrides BUZZ_TOKEN and the saved session)
   -h, --help                    display help for command
@@ -73,7 +76,8 @@ Servers and account:
   login                         Sign in via your browser
   logout                        Sign out and clear the stored session
   whoami                        Show the current signed-in user
-  config [key] [value]          View or set configuration (server)
+  config [key] [value]          Show servers, or set the default with 'config
+                                server <url>' (same as 'server default')
 
 Commands:
   help [command]                display help for command
@@ -87,9 +91,16 @@ Usage: buzz deploy [options] <directory>
 Deploy a directory to the server
 
 Options:
-  --site <name>  Site to deploy to (created if needed)
-  --private      Publish the site so only you can view it
-  -h, --help     display help for command
+  --site <name>               Site to deploy to (created if needed)
+  --private                   Publish the site so only you can view it
+  -h, --help                  display help for command
+
+Global Options:
+  -V, --version               output the version number
+  -s, --server <name-or-url>  Saved server name or URL for this command
+                              (overrides BUZZ_SERVER and the saved default)
+  -t, --token <token>         Session or deployment token for this command
+                              (overrides BUZZ_TOKEN and the saved session)
 ```
 
 ## buzz deployments
@@ -101,6 +112,15 @@ List deployments or make one live
 
 Options:
   -h, --help                         display help for command
+
+Global Options:
+  -V, --version                      output the version number
+  -s, --server <name-or-url>         Saved server name or URL for this command
+                                     (overrides BUZZ_SERVER and the saved
+                                     default)
+  -t, --token <token>                Session or deployment token for this
+                                     command (overrides BUZZ_TOKEN and the saved
+                                     session)
 
 Commands:
   list [options]                     List deployments for a site
@@ -116,8 +136,15 @@ Usage: buzz deployments list [options]
 List deployments for a site
 
 Options:
-  --site <site>  Site name (defaults to the current CNAME)
-  -h, --help     display help for command
+  --site <site>               Site name (defaults to the current CNAME)
+  -h, --help                  display help for command
+
+Global Options:
+  -V, --version               output the version number
+  -s, --server <name-or-url>  Saved server name or URL for this command
+                              (overrides BUZZ_SERVER and the saved default)
+  -t, --token <token>         Session or deployment token for this command
+                              (overrides BUZZ_TOKEN and the saved session)
 ```
 
 ## buzz deployments use
@@ -128,8 +155,15 @@ Usage: buzz deployments use [options] <deployment-number>
 Make a deployment live for a site
 
 Options:
-  --site <site>  Site name (defaults to the current CNAME)
-  -h, --help     display help for command
+  --site <site>               Site name (defaults to the current CNAME)
+  -h, --help                  display help for command
+
+Global Options:
+  -V, --version               output the version number
+  -s, --server <name-or-url>  Saved server name or URL for this command
+                              (overrides BUZZ_SERVER and the saved default)
+  -t, --token <token>         Session or deployment token for this command
+                              (overrides BUZZ_TOKEN and the saved session)
 ```
 
 ## buzz list
@@ -140,7 +174,14 @@ Usage: buzz list [options]
 List sites owned by the signed-in user
 
 Options:
-  -h, --help  display help for command
+  -h, --help                  display help for command
+
+Global Options:
+  -V, --version               output the version number
+  -s, --server <name-or-url>  Saved server name or URL for this command
+                              (overrides BUZZ_SERVER and the saved default)
+  -t, --token <token>         Session or deployment token for this command
+                              (overrides BUZZ_TOKEN and the saved session)
 ```
 
 ## buzz url
@@ -151,7 +192,14 @@ Usage: buzz url [options]
 Show the URL for the current directory
 
 Options:
-  -h, --help  display help for command
+  -h, --help                  display help for command
+
+Global Options:
+  -V, --version               output the version number
+  -s, --server <name-or-url>  Saved server name or URL for this command
+                              (overrides BUZZ_SERVER and the saved default)
+  -t, --token <token>         Session or deployment token for this command
+                              (overrides BUZZ_TOKEN and the saved session)
 ```
 
 ## buzz delete
@@ -162,8 +210,15 @@ Usage: buzz delete [options] <site>
 Delete a deployed site
 
 Options:
-  -y, --yes   Skip confirmation prompt
-  -h, --help  display help for command
+  -y, --yes                   Skip confirmation prompt
+  -h, --help                  display help for command
+
+Global Options:
+  -V, --version               output the version number
+  -s, --server <name-or-url>  Saved server name or URL for this command
+                              (overrides BUZZ_SERVER and the saved default)
+  -t, --token <token>         Session or deployment token for this command
+                              (overrides BUZZ_TOKEN and the saved session)
 ```
 
 ## buzz access
@@ -174,13 +229,20 @@ Usage: buzz access [options] [command]
 Show or change who can view a site
 
 Options:
-  -h, --help         display help for command
+  -h, --help                  display help for command
+
+Global Options:
+  -V, --version               output the version number
+  -s, --server <name-or-url>  Saved server name or URL for this command
+                              (overrides BUZZ_SERVER and the saved default)
+  -t, --token <token>         Session or deployment token for this command
+                              (overrides BUZZ_TOKEN and the saved session)
 
 Commands:
-  status [options]   Show who can view this site (default)
-  private [options]  Let only the site owner view this site
-  public [options]   Let anyone view this site
-  help [command]     display help for command
+  status [options]            Show who can view this site (default)
+  private [options]           Let only the site owner view this site
+  public [options]            Let anyone view this site
+  help [command]              display help for command
 ```
 
 ## buzz access status
@@ -191,8 +253,15 @@ Usage: buzz access status [options]
 Show who can view this site (default)
 
 Options:
-  --site <site>  Site name (defaults to the current CNAME)
-  -h, --help     display help for command
+  --site <site>               Site name (defaults to the current CNAME)
+  -h, --help                  display help for command
+
+Global Options:
+  -V, --version               output the version number
+  -s, --server <name-or-url>  Saved server name or URL for this command
+                              (overrides BUZZ_SERVER and the saved default)
+  -t, --token <token>         Session or deployment token for this command
+                              (overrides BUZZ_TOKEN and the saved session)
 ```
 
 ## buzz access private
@@ -203,8 +272,15 @@ Usage: buzz access private [options]
 Let only the site owner view this site
 
 Options:
-  --site <site>  Site name (defaults to the current CNAME)
-  -h, --help     display help for command
+  --site <site>               Site name (defaults to the current CNAME)
+  -h, --help                  display help for command
+
+Global Options:
+  -V, --version               output the version number
+  -s, --server <name-or-url>  Saved server name or URL for this command
+                              (overrides BUZZ_SERVER and the saved default)
+  -t, --token <token>         Session or deployment token for this command
+                              (overrides BUZZ_TOKEN and the saved session)
 ```
 
 ## buzz access public
@@ -215,9 +291,16 @@ Usage: buzz access public [options]
 Let anyone view this site
 
 Options:
-  --site <site>  Site name (defaults to the current CNAME)
-  -y, --yes      Skip confirmation prompt
-  -h, --help     display help for command
+  --site <site>               Site name (defaults to the current CNAME)
+  -y, --yes                   Skip confirmation prompt
+  -h, --help                  display help for command
+
+Global Options:
+  -V, --version               output the version number
+  -s, --server <name-or-url>  Saved server name or URL for this command
+                              (overrides BUZZ_SERVER and the saved default)
+  -t, --token <token>         Session or deployment token for this command
+                              (overrides BUZZ_TOKEN and the saved session)
 ```
 
 ## buzz domains
@@ -229,6 +312,15 @@ Manage custom domains
 
 Options:
   -h, --help                         display help for command
+
+Global Options:
+  -V, --version                      output the version number
+  -s, --server <name-or-url>         Saved server name or URL for this command
+                                     (overrides BUZZ_SERVER and the saved
+                                     default)
+  -t, --token <token>                Session or deployment token for this
+                                     command (overrides BUZZ_TOKEN and the saved
+                                     session)
 
 Commands:
   list [site]                        List custom domains and lifecycle status
@@ -250,7 +342,14 @@ Usage: buzz domains list [options] [site]
 List custom domains and lifecycle status
 
 Options:
-  -h, --help  display help for command
+  -h, --help                  display help for command
+
+Global Options:
+  -V, --version               output the version number
+  -s, --server <name-or-url>  Saved server name or URL for this command
+                              (overrides BUZZ_SERVER and the saved default)
+  -t, --token <token>         Session or deployment token for this command
+                              (overrides BUZZ_TOKEN and the saved session)
 ```
 
 ## buzz domains add
@@ -261,7 +360,14 @@ Usage: buzz domains add [options] <site> <domain>
 Attach a custom domain to a site
 
 Options:
-  -h, --help  display help for command
+  -h, --help                  display help for command
+
+Global Options:
+  -V, --version               output the version number
+  -s, --server <name-or-url>  Saved server name or URL for this command
+                              (overrides BUZZ_SERVER and the saved default)
+  -t, --token <token>         Session or deployment token for this command
+                              (overrides BUZZ_TOKEN and the saved session)
 ```
 
 ## buzz domains check
@@ -272,7 +378,14 @@ Usage: buzz domains check [options] <site> <domain>
 Check custom-domain ownership and activation
 
 Options:
-  -h, --help  display help for command
+  -h, --help                  display help for command
+
+Global Options:
+  -V, --version               output the version number
+  -s, --server <name-or-url>  Saved server name or URL for this command
+                              (overrides BUZZ_SERVER and the saved default)
+  -t, --token <token>         Session or deployment token for this command
+                              (overrides BUZZ_TOKEN and the saved session)
 ```
 
 ## buzz domains retry
@@ -283,7 +396,14 @@ Usage: buzz domains retry [options] <site> <domain>
 Retry a failed connection transition
 
 Options:
-  -h, --help  display help for command
+  -h, --help                  display help for command
+
+Global Options:
+  -V, --version               output the version number
+  -s, --server <name-or-url>  Saved server name or URL for this command
+                              (overrides BUZZ_SERVER and the saved default)
+  -t, --token <token>         Session or deployment token for this command
+                              (overrides BUZZ_TOKEN and the saved session)
 ```
 
 ## buzz domains cancel-transition
@@ -294,7 +414,14 @@ Usage: buzz domains cancel-transition [options] <site> <domain>
 Cancel an active connection transition
 
 Options:
-  -h, --help  display help for command
+  -h, --help                  display help for command
+
+Global Options:
+  -V, --version               output the version number
+  -s, --server <name-or-url>  Saved server name or URL for this command
+                              (overrides BUZZ_SERVER and the saved default)
+  -t, --token <token>         Session or deployment token for this command
+                              (overrides BUZZ_TOKEN and the saved session)
 ```
 
 ## buzz domains remove
@@ -305,8 +432,15 @@ Usage: buzz domains remove [options] <site> <domain>
 Remove a custom domain without changing DNS records
 
 Options:
-  -y, --yes   Skip confirmation prompt
-  -h, --help  display help for command
+  -y, --yes                   Skip confirmation prompt
+  -h, --help                  display help for command
+
+Global Options:
+  -V, --version               output the version number
+  -s, --server <name-or-url>  Saved server name or URL for this command
+                              (overrides BUZZ_SERVER and the saved default)
+  -t, --token <token>         Session or deployment token for this command
+                              (overrides BUZZ_TOKEN and the saved session)
 ```
 
 ## buzz tokens
@@ -317,13 +451,20 @@ Usage: buzz tokens [options] [command]
 Manage deployment tokens
 
 Options:
-  -h, --help               display help for command
+  -h, --help                  display help for command
+
+Global Options:
+  -V, --version               output the version number
+  -s, --server <name-or-url>  Saved server name or URL for this command
+                              (overrides BUZZ_SERVER and the saved default)
+  -t, --token <token>         Session or deployment token for this command
+                              (overrides BUZZ_TOKEN and the saved session)
 
 Commands:
-  list                     List your deployment tokens
-  create [options] <site>  Create a deployment token for a site
-  delete <token-id>        Delete a deployment token
-  help [command]           display help for command
+  list                        List your deployment tokens
+  create [options] <site>     Create a deployment token for a site
+  delete <token-id>           Delete a deployment token
+  help [command]              display help for command
 ```
 
 ## buzz tokens list
@@ -334,7 +475,14 @@ Usage: buzz tokens list [options]
 List your deployment tokens
 
 Options:
-  -h, --help  display help for command
+  -h, --help                  display help for command
+
+Global Options:
+  -V, --version               output the version number
+  -s, --server <name-or-url>  Saved server name or URL for this command
+                              (overrides BUZZ_SERVER and the saved default)
+  -t, --token <token>         Session or deployment token for this command
+                              (overrides BUZZ_TOKEN and the saved session)
 ```
 
 ## buzz tokens create
@@ -345,8 +493,15 @@ Usage: buzz tokens create [options] <site>
 Create a deployment token for a site
 
 Options:
-  -n, --name <name>  Token name (for identification)
-  -h, --help         display help for command
+  -n, --name <name>           Token name (for identification)
+  -h, --help                  display help for command
+
+Global Options:
+  -V, --version               output the version number
+  -s, --server <name-or-url>  Saved server name or URL for this command
+                              (overrides BUZZ_SERVER and the saved default)
+  -t, --token <token>         Session or deployment token for this command
+                              (overrides BUZZ_TOKEN and the saved session)
 ```
 
 ## buzz tokens delete
@@ -357,18 +512,65 @@ Usage: buzz tokens delete [options] <token-id>
 Delete a deployment token
 
 Options:
-  -h, --help  display help for command
+  -h, --help                  display help for command
+
+Global Options:
+  -V, --version               output the version number
+  -s, --server <name-or-url>  Saved server name or URL for this command
+                              (overrides BUZZ_SERVER and the saved default)
+  -t, --token <token>         Session or deployment token for this command
+                              (overrides BUZZ_TOKEN and the saved session)
 ```
 
 ## buzz server
 
 ```text
-Usage: buzz server [options]
+Usage: buzz server [options] [command]
 
 Show saved servers, the default, and which one commands target
 
 Options:
-  --json      Print the overview as JSON
+  --json                      Print the overview as JSON
+  -h, --help                  display help for command
+
+Commands:
+  add [options] <name> <url>  Save a server under a name, without signing in
+  default <name-or-url>       Change the saved default server
+  remove <name>               Remove a server name, keeping its session and
+                              default
+```
+
+## buzz server add
+
+```text
+Usage: buzz server add [options] <name> <url>
+
+Save a server under a name, without signing in
+
+Options:
+  --default   Also make it the default server
+  -h, --help  display help for command
+```
+
+## buzz server default
+
+```text
+Usage: buzz server default [options] <name-or-url>
+
+Change the saved default server
+
+Options:
+  -h, --help  display help for command
+```
+
+## buzz server remove
+
+```text
+Usage: buzz server remove [options] <name>
+
+Remove a server name, keeping its session and default
+
+Options:
   -h, --help  display help for command
 ```
 
@@ -380,7 +582,14 @@ Usage: buzz login [options]
 Sign in via your browser
 
 Options:
-  -h, --help  display help for command
+  -h, --help                  display help for command
+
+Global Options:
+  -V, --version               output the version number
+  -s, --server <name-or-url>  Saved server name or URL for this command
+                              (overrides BUZZ_SERVER and the saved default)
+  -t, --token <token>         Session or deployment token for this command
+                              (overrides BUZZ_TOKEN and the saved session)
 ```
 
 ## buzz logout
@@ -391,7 +600,14 @@ Usage: buzz logout [options]
 Sign out and clear the stored session
 
 Options:
-  -h, --help  display help for command
+  -h, --help                  display help for command
+
+Global Options:
+  -V, --version               output the version number
+  -s, --server <name-or-url>  Saved server name or URL for this command
+                              (overrides BUZZ_SERVER and the saved default)
+  -t, --token <token>         Session or deployment token for this command
+                              (overrides BUZZ_TOKEN and the saved session)
 ```
 
 ## buzz whoami
@@ -402,7 +618,14 @@ Usage: buzz whoami [options]
 Show the current signed-in user
 
 Options:
-  -h, --help  display help for command
+  -h, --help                  display help for command
+
+Global Options:
+  -V, --version               output the version number
+  -s, --server <name-or-url>  Saved server name or URL for this command
+                              (overrides BUZZ_SERVER and the saved default)
+  -t, --token <token>         Session or deployment token for this command
+                              (overrides BUZZ_TOKEN and the saved session)
 ```
 
 ## buzz config
@@ -410,8 +633,16 @@ Options:
 ```text
 Usage: buzz config [options] [key] [value]
 
-View or set configuration (server)
+Show servers, or set the default with 'config server <url>' (same as 'server
+default')
 
 Options:
-  -h, --help  display help for command
+  -h, --help                  display help for command
+
+Global Options:
+  -V, --version               output the version number
+  -s, --server <name-or-url>  Saved server name or URL for this command
+                              (overrides BUZZ_SERVER and the saved default)
+  -t, --token <token>         Session or deployment token for this command
+                              (overrides BUZZ_TOKEN and the saved session)
 ```

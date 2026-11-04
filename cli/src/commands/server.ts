@@ -1,9 +1,20 @@
 import { Command } from "commander";
 import { CliError } from "../errors.js";
-import { CONFIG_PATH, loadConfig, tryNormalize, type Config } from "../credentials.js";
+import {
+  CONFIG_PATH,
+  getCredential,
+  isServerName,
+  loadConfig,
+  normalizeServerUrl,
+  saveConfig,
+  serverNameFor,
+  tryNormalize,
+  type Config,
+} from "../credentials.js";
 import {
   CREDENTIAL_LABELS,
   SELECTION_LABELS,
+  resolveSelector,
   selectServer,
   serverLabel,
   serverSelector,
@@ -11,6 +22,7 @@ import {
   type CliOptions,
   type CredentialSource,
   type Selection,
+  type Server,
 } from "../target.js";
 
 interface ServerEntry {
@@ -42,11 +54,11 @@ function toError(error: unknown): OverviewError {
 }
 
 function knownServers(config: Config): ServerEntry[] {
-  const urls = new Set<string>();
+  const urls = new Set<string>(Object.values(config.servers ?? {}));
   if (config.server) urls.add(tryNormalize(config.server) ?? config.server);
   for (const url of Object.keys(config.credentials ?? {})) urls.add(url);
   return [...urls].map((url) => ({
-    name: null,
+    name: serverNameFor(config, url) ?? null,
     url,
     session_saved: config.credentials?.[url] !== undefined,
   }));
@@ -71,7 +83,8 @@ export function inspectServers(cliOptions: CliOptions = {}): Overview {
 
   overview.servers = knownServers(config);
   if (config.server) {
-    overview.default_server = { name: null, url: tryNormalize(config.server) ?? config.server };
+    const url = tryNormalize(config.server) ?? config.server;
+    overview.default_server = { name: serverNameFor(config, url) ?? null, url };
   }
   try {
     const selection = selectServer(cliOptions, config);
@@ -131,17 +144,36 @@ function targetLines(overview: Overview): string[] {
   return lines;
 }
 
+const ADD_SERVER = "Add a server: buzz server add <name> <url> --default";
+
+function exampleLines(overview: Overview): string[] {
+  const servers = overview.servers ?? [];
+  const other =
+    servers.find((server) => server.url !== overview.selected_server?.url) ??
+    (servers.length === 1 ? servers[0] : undefined);
+  if (!other) return [ADD_SERVER];
+  const selector = serverSelector(other);
+  const isOther = other.url !== overview.selected_server?.url;
+  return [
+    isOther ? "Use another server for one command:" : "Target this server explicitly for one command:",
+    `  buzz deploy ./dist --site my-site --server ${selector}`,
+    "",
+    "Sign in to that server:",
+    `  buzz login --server ${selector}`,
+    "",
+    "Change the saved default:",
+    `  buzz server default ${selector}`,
+    "",
+    "--server applies to one command. Signing in preserves the default.",
+    "Session saved means a local credential exists. Use whoami to verify an account.",
+  ];
+}
+
 export function formatOverview(overview: Overview): string {
   const sections: string[][] = [];
-  if (overview.servers?.length) {
-    sections.push(serverTable(overview));
-  } else {
-    sections.push([
-      "No servers saved yet.",
-      "Set a default: buzz config server <url>",
-    ]);
-  }
+  sections.push(overview.servers?.length ? serverTable(overview) : ["No servers saved yet."]);
   sections.push(targetLines(overview));
+  sections.push(exampleLines(overview));
   sections.push([`Config file: ${CONFIG_PATH}`]);
   return sections.map((lines) => lines.join("\n")).join("\n\n");
 }
@@ -158,10 +190,112 @@ export function showServers(options: { json?: boolean }, cliOptions: CliOptions 
   if (error) throw new CliError(error.message, error.tip, error.code);
 }
 
+function shellOverrideNote(config: Config, server: Server): string[] {
+  if (!process.env.BUZZ_SERVER?.trim()) return [];
+  let selection: Selection | undefined;
+  try {
+    selection = selectServer({}, config);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return [`BUZZ_SERVER is set but does not resolve: ${reason}`];
+  }
+  if (!selection || selection.url === server.url) return [];
+  return [
+    `Commands in this shell still target ${serverLabel(selection)} because BUZZ_SERVER is set.`,
+    `Unset BUZZ_SERVER or pass --server ${serverSelector(server)}.`,
+  ];
+}
+
+function invalidName(name: string): CliError {
+  return new CliError(
+    `Invalid server name '${name}'`,
+    "Use lowercase letters, digits, and hyphens, starting with a letter",
+    "INVALID_SERVER_NAME"
+  );
+}
+
+function registerName(config: Config, name: string, url: string): boolean {
+  const existing = config.servers?.[name];
+  if (existing === url) return false;
+  if (existing) {
+    throw new CliError(
+      `Server '${name}' already points to ${existing}`,
+      `Remove it first: buzz server remove ${name}`
+    );
+  }
+  const otherName = serverNameFor(config, url);
+  if (otherName) {
+    throw new CliError(
+      `${url} is already saved as '${otherName}'`,
+      `Use --server ${otherName}, or remove that name first`
+    );
+  }
+  config.servers = { ...config.servers, [name]: url };
+  return true;
+}
+
+export function addServer(name: string, rawUrl: string, options: { default?: boolean }): void {
+  if (!isServerName(name)) throw invalidName(name);
+  const url = normalizeServerUrl(rawUrl);
+  const config = loadConfig();
+  const server = { name, url };
+  const added = registerName(config, name, url);
+  if (options.default) config.server = url;
+  saveConfig(config);
+
+  const lines = [`${added ? "Saved" : "Already saved:"} server ${serverLabel(server)}.`];
+  if (options.default) lines.push(`Default server: ${serverLabel(server)}`);
+  if (!getCredential(config, url)) lines.push(`Sign in: buzz login --server ${name}`);
+  console.log([...lines, ...shellOverrideNote(config, server)].join("\n"));
+}
+
+export function setDefaultServer(selector: string): void {
+  const config = loadConfig();
+  const server = resolveSelector(selector, config);
+  config.server = server.url;
+  saveConfig(config);
+  console.log([`Default server: ${serverLabel(server)}`, ...shellOverrideNote(config, server)].join("\n"));
+}
+
+export function removeServer(name: string): void {
+  const config = loadConfig();
+  const url = config.servers?.[name];
+  if (!url) {
+    throw new CliError(`Unknown server '${name}'`, "See saved servers: buzz server", "UNKNOWN_SERVER");
+  }
+  const { [name]: _removed, ...rest } = config.servers!;
+  config.servers = Object.keys(rest).length ? rest : undefined;
+  saveConfig(config);
+
+  const lines = [`Removed server name '${name}'.`];
+  if (config.server === url) lines.push(`Default remains ${url}.`);
+  if (getCredential(config, url)) {
+    lines.push(`Saved session retained. Sign out with: buzz logout --server ${url}`);
+  }
+  console.log(lines.join("\n"));
+}
+
 export function registerServerCommand(program: Command): void {
-  program
+  const server = program
     .command("server")
     .description("Show saved servers, the default, and which one commands target")
     .option("--json", "Print the overview as JSON")
-    .action((options: { json?: boolean }) => showServers(options, program.opts()));
+    .action((options: { json?: boolean }) => showServers(options, program.opts()))
+    // Subcommands only edit local config, so --json and --server do not apply to them.
+    .configureHelp({ showGlobalOptions: false });
+  server
+    .command("add <name> <url>")
+    .description("Save a server under a name, without signing in")
+    .option("--default", "Also make it the default server")
+    .action((name: string, url: string, options: { default?: boolean }) =>
+      addServer(name, url, options)
+    );
+  server
+    .command("default <name-or-url>")
+    .description("Change the saved default server")
+    .action(setDefaultServer);
+  server
+    .command("remove <name>")
+    .description("Remove a server name, keeping its session and default")
+    .action(removeServer);
 }

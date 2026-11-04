@@ -9,7 +9,18 @@ export const LEGACY_DEFAULT_SERVER = "http://localhost:8080";
 
 export interface Config {
   server?: string;
+  servers?: Record<string, string>;
   credentials?: Record<string, string>;
+}
+
+const SERVER_NAME = /^[a-z][a-z0-9-]*$/;
+
+export function isServerName(value: string): boolean {
+  return SERVER_NAME.test(value);
+}
+
+export function serverNameFor(config: Config, url: string): string | undefined {
+  return Object.entries(config.servers ?? {}).find(([, saved]) => saved === url)?.[0];
 }
 
 export class ConfigUnreadableError extends CliError {
@@ -87,6 +98,14 @@ function parseConfig(raw: Record<string, unknown>): Config {
   const config: Config = {};
   if (typeof raw.server === "string" && raw.server.trim()) {
     config.server = tryNormalize(raw.server) ?? raw.server;
+  }
+  if (typeof raw.servers === "object" && raw.servers !== null) {
+    for (const [name, server] of Object.entries(raw.servers)) {
+      const url = typeof server === "string" ? tryNormalize(server) : undefined;
+      if (isServerName(name) && url) {
+        config.servers = { ...config.servers, [name]: url };
+      }
+    }
   }
   if (typeof raw.credentials === "object" && raw.credentials !== null) {
     for (const [server, token] of Object.entries(raw.credentials)) {

@@ -1,5 +1,12 @@
 import { CliError } from "./errors.js";
-import { getCredential, loadConfig, normalizeServerUrl, type Config } from "./credentials.js";
+import {
+  getCredential,
+  isServerName,
+  loadConfig,
+  normalizeServerUrl,
+  serverNameFor,
+  type Config,
+} from "./credentials.js";
 
 export interface CliOptions {
   server?: string;
@@ -46,15 +53,35 @@ export function serverSelector(server: Server): string {
   return server.name ?? server.url;
 }
 
-export function resolveSelector(value: string, _config: Config): Server {
-  if (!value.trim()) {
+function savedNamesTip(config: Config): string {
+  const names = Object.keys(config.servers ?? {});
+  return names.length ? `Saved servers: ${names.join(", ")}` : "No servers are saved yet";
+}
+
+function lookupName(value: string, config: Config): Server {
+  const url = config.servers?.[value];
+  if (!url) {
     throw new CliError(
-      "The server selector is empty",
-      "Pass a full URL like https://buzz.example.com",
+      `Unknown server '${value}'`,
+      `${savedNamesTip(config)}. Add it with 'buzz server add ${value} <url>'`,
+      "UNKNOWN_SERVER"
+    );
+  }
+  return { url, name: value };
+}
+
+export function resolveSelector(value: string, config: Config): Server {
+  const trimmed = value.trim();
+  if (isServerName(trimmed)) return lookupName(trimmed, config);
+  if (!trimmed.includes("://")) {
+    throw new CliError(
+      `Invalid server '${value}'`,
+      "Use a saved server name or a full URL like https://buzz.example.com",
       "INVALID_SERVER_SELECTOR"
     );
   }
-  return { url: normalizeServerUrl(value) };
+  const url = normalizeServerUrl(trimmed);
+  return { url, name: serverNameFor(config, url) };
 }
 
 function selector(
@@ -83,12 +110,12 @@ export function selectServer(cliOptions: CliOptions, config: Config): Selection 
   }
 }
 
-export function noServerSelected(): CliError {
-  return new CliError(
-    "No server selected",
-    "Set a default with 'buzz config server <url>', or pass --server <url>",
-    "NO_SERVER_SELECTED"
-  );
+export function noServerSelected(config: Config): CliError {
+  const names = Object.keys(config.servers ?? {});
+  const tip = names.length
+    ? `${savedNamesTip(config)}. Pass --server <name> or run 'buzz server default <name>'`
+    : "Add a server: buzz server add <name> <url> --default";
+  return new CliError("No server selected", tip, "NO_SERVER_SELECTED");
 }
 
 export function withCredential(
@@ -107,6 +134,6 @@ export function withCredential(
 
 export function resolveTarget(cliOptions: CliOptions = {}, config: Config = loadConfig()): Target {
   const selection = selectServer(cliOptions, config);
-  if (!selection) throw noServerSelected();
+  if (!selection) throw noServerSelected(config);
   return withCredential(selection, cliOptions, config);
 }

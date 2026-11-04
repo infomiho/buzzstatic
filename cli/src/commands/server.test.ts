@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { rmSync, writeFileSync } from "node:fs";
-import { CONFIG_PATH, saveConfig } from "../credentials.js";
-import { inspectServers, showServers } from "./server.js";
+import { CONFIG_PATH, loadConfig, saveConfig } from "../credentials.js";
+import { resolveTarget } from "../target.js";
+import { addServer, inspectServers, removeServer, setDefaultServer, showServers } from "./server.js";
 
 function captureStdout(): () => string {
   const log = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -82,5 +83,123 @@ describe("server overview", () => {
     const overview = JSON.parse(stdout());
     expect(overview.servers).toBeNull();
     expect(overview.error.code).toBe("CONFIG_UNREADABLE");
+  });
+});
+
+const PERSONAL = "https://personal.example.com";
+const WORK = "https://work.example.com";
+
+describe("server names and default", () => {
+  it("adds a server without changing the default or creating a session", () => {
+    saveConfig({ server: PERSONAL, credentials: { [PERSONAL]: "p" } });
+    const stdout = captureStdout();
+
+    addServer("work", "HTTPS://Work.Example.com/", {});
+
+    expect(loadConfig()).toEqual({
+      server: PERSONAL,
+      servers: { work: WORK },
+      credentials: { [PERSONAL]: "p" },
+    });
+    expect(stdout()).toContain("Sign in: buzz login --server work");
+  });
+
+  it("sets the default only when asked", () => {
+    addServer("personal", PERSONAL, { default: true });
+
+    expect(loadConfig().server).toBe(PERSONAL);
+  });
+
+  it("names a migrated URL while keeping its session and default", () => {
+    saveConfig({ server: WORK, credentials: { [WORK]: "w" } });
+    captureStdout();
+
+    addServer("work", WORK, {});
+
+    expect(loadConfig()).toMatchObject({ server: WORK, credentials: { [WORK]: "w" } });
+  });
+
+  it("is idempotent for the same name and URL", () => {
+    captureStdout();
+    addServer("work", WORK, {});
+
+    expect(() => addServer("work", `${WORK}/`, {})).not.toThrow();
+  });
+
+  it("rejects a name that points elsewhere or a second name for one URL", () => {
+    captureStdout();
+    addServer("work", WORK, {});
+
+    expect(() => addServer("work", PERSONAL, {})).toThrow("already points to");
+    expect(() => addServer("job", WORK, {})).toThrow("already saved as 'work'");
+    expect(() => addServer("Work", PERSONAL, {})).toThrow("Invalid server name");
+  });
+
+  it("targets a named server for one command and keeps the default", () => {
+    saveConfig({ server: PERSONAL, servers: { work: WORK }, credentials: { [WORK]: "w" } });
+
+    expect(resolveTarget({ server: "work" })).toMatchObject({ url: WORK, name: "work", token: "w" });
+    expect(loadConfig().server).toBe(PERSONAL);
+  });
+
+  it("explains that BUZZ_SERVER still wins after changing the default", () => {
+    saveConfig({ server: PERSONAL, servers: { personal: PERSONAL, work: WORK } });
+    vi.stubEnv("BUZZ_SERVER", "personal");
+    const stdout = captureStdout();
+
+    setDefaultServer("work");
+
+    expect(loadConfig().server).toBe(WORK);
+    expect(stdout()).toContain(
+      "Commands in this shell still target personal (https://personal.example.com) because BUZZ_SERVER is set."
+    );
+  });
+
+  it("keeps the default URL and session when removing a name", () => {
+    saveConfig({ server: WORK, servers: { work: WORK }, credentials: { [WORK]: "w" } });
+    const stdout = captureStdout();
+
+    removeServer("work");
+
+    expect(loadConfig()).toEqual({ server: WORK, credentials: { [WORK]: "w" } });
+    expect(stdout()).toContain(`Default remains ${WORK}.`);
+    expect(stdout()).toContain(`buzz logout --server ${WORK}`);
+  });
+
+  it("does not move a session or default when a removed name is reused", () => {
+    saveConfig({ server: WORK, servers: { work: WORK }, credentials: { [WORK]: "w" } });
+    captureStdout();
+
+    removeServer("work");
+    addServer("work", PERSONAL, {});
+
+    expect(loadConfig()).toMatchObject({ server: WORK, credentials: { [WORK]: "w" } });
+    expect(resolveTarget({ server: "work" })).toMatchObject({ url: PERSONAL, credential: "none" });
+  });
+
+  it("repairs an unresolved BUZZ_SERVER name by registering it", () => {
+    saveConfig({ server: PERSONAL });
+    vi.stubEnv("BUZZ_SERVER", "work");
+    expect(() => resolveTarget()).toThrow(expect.objectContaining({ code: "UNKNOWN_SERVER" }));
+    captureStdout();
+
+    addServer("work", WORK, {});
+
+    expect(resolveTarget()).toMatchObject({ url: WORK, source: "env" });
+    expect(loadConfig().server).toBe(PERSONAL);
+  });
+
+  it("teaches overrides with names, or URLs for unnamed servers", () => {
+    saveConfig({ server: PERSONAL, servers: { work: WORK }, credentials: { [PERSONAL]: "p" } });
+    let stdout = captureStdout();
+    showServers({});
+    expect(stdout()).toContain("buzz deploy ./dist --site my-site --server work");
+    expect(stdout()).toContain("buzz server default work");
+
+    vi.restoreAllMocks();
+    saveConfig({ server: PERSONAL, credentials: { [PERSONAL]: "p", [WORK]: "w" } });
+    stdout = captureStdout();
+    showServers({});
+    expect(stdout()).toContain(`buzz login --server ${WORK}`);
   });
 });

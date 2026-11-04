@@ -41,6 +41,9 @@ describe("createProgram", () => {
       "tokens create",
       "tokens delete",
       "server",
+      "server add",
+      "server default",
+      "server remove",
       "login",
       "logout",
       "whoami",
@@ -52,7 +55,7 @@ describe("createProgram", () => {
     const help = createProgram().helpInformation();
 
     expect(help).toContain("Usage: buzz [options] [command]");
-    expect(help).toContain("Buzz server URL");
+    expect(help).toContain("Saved server name or URL");
     expect(help).toContain("Session or deployment token");
     expect(help).toContain("deploy [options] <directory>");
   });
