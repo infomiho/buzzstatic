@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.17.0](https://github.com/infomiho/buzzstatic/compare/buzz-cli-v0.16.0...buzz-cli-v0.17.0) (2026-11-05)
+
+
+### Features
+
+* make the target Buzz server explicit ([#42](https://github.com/infomiho/buzzstatic/issues/42)) ([71d85cf](https://github.com/infomiho/buzzstatic/commit/71d85cfa87d4c6e77c5aa96a4f90b6950b692a44))
+* make the target Buzz server explicit ([#42](https://github.com/infomiho/buzzstatic/issues/42)) ([dbada3c](https://github.com/infomiho/buzzstatic/commit/dbada3c29aadac75f8900381c200c10bc1e29c3d))
+
 ## [0.16.0](https://github.com/infomiho/buzzstatic/compare/buzz-cli-v0.15.1...buzz-cli-v0.16.0) (2026-10-14)
 
 
