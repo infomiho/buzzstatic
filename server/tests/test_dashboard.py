@@ -632,3 +632,21 @@ class TestAccessControl:
 
         assert res.status_code == 403
         assert "alice" in res.json()["detail"]
+
+
+def test_local_server_reports_its_own_port(make_app, database, user_and_token, tmp_path):
+    user_id, token = user_and_token
+    with database.connect() as conn:
+        conn.execute(
+            "INSERT INTO sites (name, owner_id, size_bytes) VALUES ('my-site', ?, 0)",
+            (user_id,),
+        )
+    (tmp_path / "my-site").mkdir()
+    client = TestClient(make_app(port=9202))
+
+    grant = client.post("/auth/device").json()
+    client.cookies.set(COOKIE_NAME, token)
+    detail = client.get("/dashboard/sites/my-site")
+
+    assert grant["verification_uri"] == "http://localhost:9202/device"
+    assert 'href="http://my-site.localhost:9202"' in detail.text

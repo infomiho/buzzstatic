@@ -203,10 +203,7 @@ async def site_detail(
         )
     ]
 
-    if domain and domain != "localhost:8080":
-        site_url = f"https://{name}.{domain}"
-    else:
-        site_url = f"http://{name}.localhost:8080"
+    site_url = f"{settings.control_scheme}://{name}.{domain}"
 
     return templates.TemplateResponse(request, "site_detail.html", {
         "user": identity.user,
