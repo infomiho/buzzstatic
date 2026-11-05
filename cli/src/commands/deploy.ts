@@ -1,7 +1,8 @@
 import { Command } from "commander";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { getOptions, CliError, type CliOptions } from "../client.js";
+import { CliError, type CliOptions } from "../client.js";
+import { missingCredential, resolveTarget, serverLabel, targetSummary } from "../target.js";
 import { checkServerCompatibility } from "../compat.js";
 import { createProgressBar, createSpinner, formatSize } from "../lib.js";
 import {
@@ -17,15 +18,16 @@ export async function deploy(
   cliOptions: CliOptions = {},
   makePrivate = false
 ) {
-  const options = getOptions(cliOptions);
+  const target = resolveTarget(cliOptions);
 
-  if (!options.token) {
-    throw new CliError("Not authenticated", "Run 'buzz login' first");
-  }
-
-  await checkServerCompatibility(cliOptions);
+  if (!target.token) throw missingCredential(target);
 
   siteName = resolveSiteName(process.cwd(), directory, siteName);
+  const site = siteName ? `'${siteName}'` : "a new site (name assigned by the server)";
+  console.error(`Deploying ${site} to ${serverLabel(target)}`);
+  console.error(targetSummary(target));
+
+  await checkServerCompatibility(target);
 
   const progressBar = createProgressBar("Zipping");
   let progressStarted = false;
@@ -47,7 +49,7 @@ export async function deploy(
     }
   }
 
-  console.log(`Compressed to ${formatSize(zipBuffer.length)}`);
+  console.error(`Compressed to ${formatSize(zipBuffer.length)}`);
 
   const uploadSpinner = createSpinner("Uploading");
   uploadSpinner.start();
@@ -55,8 +57,7 @@ export async function deploy(
   let result: DeployResult;
   try {
     result = await uploadSite(
-      options.server,
-      options.token,
+      target,
       zipBuffer,
       siteName,
       globalThis.fetch,

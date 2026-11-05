@@ -276,8 +276,11 @@ describe("domain commands", () => {
 
     await removeDomain("my-site", "www.example.com", {}, cliOptions, { confirm });
 
-    expect(confirm).toHaveBeenCalledOnce();
+    expect(confirm).toHaveBeenCalledWith(
+      expect.stringContaining("from site 'my-site' on https://buzz.example.com?")
+    );
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.every(([url]) => String(url).startsWith("https://buzz.example.com/"))).toBe(true);
     expect(console.log).toHaveBeenCalledWith("Aborted.");
   });
 
@@ -344,7 +347,7 @@ describe("domain commands", () => {
 
     await expect(listDomains("my-site", cliOptions)).rejects.toMatchObject({
       message: "Deployment tokens cannot manage custom domains",
-      tip: "Run 'buzz login' and retry with a full session",
+      tip: "Omit --token, then run: buzz login --server https://buzz.example.com",
     });
   });
 });

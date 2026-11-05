@@ -4,9 +4,12 @@ import {
   isRecord,
   requestEmpty,
   requestJson,
+  sessionOnly,
   type ApiErrors,
   type CliOptions,
+  type Target,
 } from "../client.js";
+import { announcedTarget, serverLabel } from "../target.js";
 import { confirm } from "../prompts.js";
 import { resolveCurrentSite } from "../site.js";
 
@@ -27,13 +30,7 @@ interface PublicDependencies {
 }
 
 const accessErrors: ApiErrors = {
-  forbidden: (message) =>
-    message === "Deploy tokens cannot perform this operation"
-      ? new CliError(
-          "Deployment tokens cannot manage site access",
-          "Run 'buzz login' and retry with a full session"
-        )
-      : new CliError(message),
+  forbidden: sessionOnly("manage site access"),
 };
 
 function isAccessState(value: unknown): value is AccessState {
@@ -50,7 +47,7 @@ function printAccess(site: string, state: AccessState): void {
 
 async function reportVisibility(
   site: string,
-  cliOptions: CliOptions,
+  target: Target,
   init: RequestInit,
   fallback: string
 ): Promise<void> {
@@ -58,8 +55,7 @@ async function reportVisibility(
     accessPath(site),
     { guard: isAccessState, invalid: "Server returned an invalid site-access response" },
     init,
-    {
-      cliOptions,
+    { target,
       errors: { ...accessErrors, notFound: `Site '${site}' not found`, fallback },
     }
   );
@@ -71,7 +67,7 @@ export async function accessStatus(
   cliOptions: CliOptions = {}
 ): Promise<void> {
   const site = resolveCurrentSite(options.site);
-  await reportVisibility(site, cliOptions, {}, "Could not get site access");
+  await reportVisibility(site, announcedTarget(cliOptions), {}, "Could not get site access");
 }
 
 export async function makePrivate(
@@ -81,7 +77,7 @@ export async function makePrivate(
   const site = resolveCurrentSite(options.site);
   await reportVisibility(
     site,
-    cliOptions,
+    announcedTarget(cliOptions),
     { method: "PUT" },
     "Could not make the site private"
   );
@@ -92,13 +88,13 @@ export async function makePublic(
   cliOptions: CliOptions = {},
   dependencies: PublicDependencies = { confirm }
 ): Promise<void> {
+  const target = announcedTarget(cliOptions);
   const site = resolveCurrentSite(options.site);
-  if (!options.yes && !(await dependencies.confirm(`Make '${site}' public?`))) {
+  if (!options.yes && !(await dependencies.confirm(`Make '${site}' public on ${serverLabel(target)}?`))) {
     console.log("Aborted.");
     return;
   }
-  await requestEmpty(accessPath(site), [204], { method: "DELETE" }, {
-    cliOptions,
+  await requestEmpty(accessPath(site), [204], { method: "DELETE" }, { target,
     errors: {
       ...accessErrors,
       notFound: `Site '${site}' not found`,

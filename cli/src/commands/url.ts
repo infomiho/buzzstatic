@@ -1,7 +1,8 @@
 import { Command } from "commander";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { CliError, getOptions, type CliOptions } from "../client.js";
+import { CliError, type CliOptions } from "../client.js";
+import { resolveTarget } from "../target.js";
 
 export function url(cliOptions: CliOptions = {}) {
   const cnamePath = join(process.cwd(), "CNAME");
@@ -9,13 +10,8 @@ export function url(cliOptions: CliOptions = {}) {
     throw new CliError("No CNAME file found", "Deploy first with: buzz deploy .");
   }
   const subdomain = readFileSync(cnamePath, "utf-8").trim();
-  const { server } = getOptions(cliOptions);
-  try {
-    const parsedServer = new URL(server);
-    console.log(`${parsedServer.protocol}//${subdomain}.${parsedServer.host}`);
-  } catch {
-    console.log(`http://${subdomain}.localhost:8080`);
-  }
+  const server = new URL(resolveTarget(cliOptions).url);
+  console.log(`${server.protocol}//${subdomain}.${server.host}`);
 }
 
 export function registerUrlCommand(program: Command) {

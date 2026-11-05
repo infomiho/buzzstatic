@@ -39,7 +39,7 @@ If the token value was lost, sign in as the site owner, create a replacement, up
 
 ## The CLI Cannot Connect Or TLS Fails
 
-1. Confirm that `BUZZ_SERVER` or the configured server URL exactly matches the operator-provided HTTPS URL.
+1. Run `buzz server` to see which server the CLI selected and why. Confirm the URL exactly matches the operator-provided HTTPS URL.
 2. Open the server URL in a browser or request it with `curl --fail --show-error https://buzz.example.com`.
 3. Retry from another network if DNS or a firewall may be blocking the request.
 4. Report DNS, certificate, timeout, gateway, or proxy errors to the operator. Do not disable TLS verification to deploy.
@@ -48,10 +48,10 @@ If the token value was lost, sign in as the site owner, create a replacement, up
 
 The session or deployment token is missing, invalid, revoked, or belongs to another Buzz server.
 
-1. Confirm the CLI's server URL points to `https://buzz.example.com`.
-2. Run `buzz whoami` when using a session.
-3. Run `buzz login` again if the session is invalid.
-4. For automation, confirm that `BUZZ_TOKEN` is present and replace it with a newly created deployment token if its status is unknown.
+1. Read the error. It names the server and the credential that was rejected, and suggests a recovery command for that credential.
+2. Run `buzz whoami --server <name-or-url>` to verify a saved session.
+3. Run `buzz login --server <name-or-url>` if the saved session is invalid. Use the same server the error named.
+4. For automation, confirm that `BUZZ_TOKEN` is present and replace it with a newly created deployment token if its status is unknown. A set `BUZZ_TOKEN` wins over any saved session.
 
 ## The Server Returns 403
 

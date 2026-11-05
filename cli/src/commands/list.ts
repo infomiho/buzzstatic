@@ -1,13 +1,15 @@
 import { Command } from "commander";
 import { isSiteArray, requestJson, type CliOptions } from "../client.js";
+import { announcedTarget } from "../target.js";
 import { formatSize } from "../lib.js";
 
 export async function list(cliOptions: CliOptions = {}) {
+  const target = announcedTarget(cliOptions);
   const sites = await requestJson(
     "/sites",
     { guard: isSiteArray, invalid: "Server returned an invalid site response" },
     {},
-    { cliOptions }
+    { target }
   );
 
   if (sites.length === 0) {

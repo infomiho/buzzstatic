@@ -27,18 +27,20 @@ buzz --version
 
 ## Sign In
 
-Point the CLI at your server, then sign in:
+Save your server under a short name, make it the default, then sign in:
 
 ```bash
-buzz config server https://buzz.example.com
+buzz server add main https://buzz.example.com --default
 buzz login
 ```
 
-`buzz login` opens your browser and prints a code. Enter the code, approve access, and the CLI saves the session to `~/.buzz.config.json`. Confirm it worked:
+`buzz login` prints the server it signs in to, opens your browser, and prints a code. Check that the page shows the right server and GitHub account, enter the code, and approve. The CLI saves the session for that server in `~/.buzz.config.json`. Confirm it worked:
 
 ```bash
 buzz whoami
 ```
+
+To use more than one Buzz server, see [Use Several Servers](../../guides/use-several-servers/).
 
 ## Deploy
 
@@ -60,7 +62,7 @@ Buzz picked that site name because you didn't supply one. To choose it yourself,
 buzz deploy ./dist --site my-site
 ```
 
-Site names are unique across a Buzz server. If someone else already owns the name, pick another. If you own it under a different GitHub account, run `buzz logout`, sign in with that account, and deploy again.
+Site names are unique across a Buzz server. If someone else already owns the name, pick another. If you own it under a different GitHub account, sign in again and approve with that account in your browser, then deploy again.
 
 ## Redeploy
 

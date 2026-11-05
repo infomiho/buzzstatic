@@ -1,5 +1,6 @@
 import { Command } from "commander";
 import { CliError, isRecord, requestJson, type CliOptions } from "../client.js";
+import { announcedTarget } from "../target.js";
 import { resolveCurrentSite } from "../site.js";
 
 interface SiteOption {
@@ -43,6 +44,7 @@ export async function deployments(
   options: SiteOption,
   cliOptions: CliOptions = {}
 ): Promise<void> {
+  const target = announcedTarget(cliOptions);
   const site = resolveCurrentSite(options.site);
   const rows = await requestJson(
     deploymentPath(site),
@@ -51,7 +53,7 @@ export async function deployments(
       invalid: "Server returned an invalid site-deployment response",
     },
     {},
-    { cliOptions, errors: { notFound: `Site '${site}' not found` } }
+    { target, errors: { notFound: `Site '${site}' not found` } }
   );
   if (rows.length === 0) {
     console.log(`No deployments for site '${site}'`);
@@ -80,6 +82,7 @@ export async function useDeployment(
   if (!Number.isInteger(deploymentNumber) || deploymentNumber < 1) {
     throw new CliError("Deployment number must be a positive integer");
   }
+  const target = announcedTarget(cliOptions);
   const site = resolveCurrentSite(options.site);
   await requestJson(
     `${deploymentPath(site)}/${deploymentNumber}/activate`,
@@ -88,8 +91,7 @@ export async function useDeployment(
       invalid: "Server returned an invalid site-deployment response",
     },
     { method: "POST" },
-    {
-      cliOptions,
+    { target,
       errors: {
         notFound: `Deployment ${deploymentNumber} not found for site '${site}'`,
       },

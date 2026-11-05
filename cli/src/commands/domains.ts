@@ -1,5 +1,6 @@
 import { Command } from "commander";
-import { CliError, type CliOptions } from "../client.js";
+import { CliError, type CliOptions, type Target } from "../client.js";
+import { announcedTarget, serverLabel } from "../target.js";
 import { confirm } from "../prompts.js";
 import {
   cancelDomainTransition,
@@ -40,11 +41,12 @@ export async function listDomains(
   siteName?: string,
   cliOptions: CliOptions = {}
 ): Promise<void> {
-  const capability = await getDomainCapability(cliOptions);
+  const target = announcedTarget(cliOptions);
+  const capability = await getDomainCapability(target);
   printCapability(capability);
   const claims = siteName
-    ? await getDomainClaims(siteName, cliOptions)
-    : await getAllDomainClaims(cliOptions);
+    ? await getDomainClaims(siteName, target)
+    : await getAllDomainClaims(target);
   if (!claims.length) {
     console.log(siteName ? `No custom domains for site '${siteName}'` : "No custom domains");
     return;
@@ -57,7 +59,8 @@ export async function addDomain(
   hostname: string,
   cliOptions: CliOptions = {}
 ): Promise<void> {
-  const capability = await getDomainCapability(cliOptions);
+  const target = announcedTarget(cliOptions);
+  const capability = await getDomainCapability(target);
   if (capability.automatic?.ready !== true) {
     throw new CliError(
       capability.automatic?.detail ??
@@ -65,7 +68,7 @@ export async function addDomain(
         "Custom domains are not ready on this server"
     );
   }
-  const claim = await createDomainClaim(siteName, hostname, cliOptions);
+  const claim = await createDomainClaim(siteName, hostname, target);
   console.log(`Added custom domain ${claim.hostname} to site '${siteName}'.\n`);
   console.log("Prove ownership by adding this DNS record:");
   console.log(`  Type:  ${claim.verification.type}`);
@@ -88,15 +91,15 @@ async function updateTransition(
   action: "retry" | "cancel",
   siteName: string,
   hostname: string,
-  cliOptions: CliOptions
+  target: Target
 ): Promise<void> {
-  const capability = await getDomainCapability(cliOptions);
+  const capability = await getDomainCapability(target);
   requireControlReady(capability);
-  const current = resolveDomainClaim(await getDomainClaims(siteName, cliOptions), hostname);
+  const current = resolveDomainClaim(await getDomainClaims(siteName, target), hostname);
   const claim = await (action === "retry" ? retryDomainTransition : cancelDomainTransition)(
     siteName,
     current.id,
-    cliOptions
+    target
   );
   console.log(formatDomainClaim(claim));
 }
@@ -105,25 +108,26 @@ export const retryTransition = (
   siteName: string,
   hostname: string,
   cliOptions: CliOptions = {}
-) => updateTransition("retry", siteName, hostname, cliOptions);
+) => updateTransition("retry", siteName, hostname, announcedTarget(cliOptions));
 
 export const cancelTransition = (
   siteName: string,
   hostname: string,
   cliOptions: CliOptions = {}
-) => updateTransition("cancel", siteName, hostname, cliOptions);
+) => updateTransition("cancel", siteName, hostname, announcedTarget(cliOptions));
 
 export async function checkDomain(
   siteName: string,
   hostname: string,
   cliOptions: CliOptions = {}
 ): Promise<void> {
-  const capability = await getDomainCapability(cliOptions);
+  const target = announcedTarget(cliOptions);
+  const capability = await getDomainCapability(target);
   requireControlReady(capability);
-  const current = resolveDomainClaim(await getDomainClaims(siteName, cliOptions), hostname);
+  const current = resolveDomainClaim(await getDomainClaims(siteName, target), hostname);
   const claim =
     current.status === "pending"
-      ? await checkDomainClaim(siteName, current.id, cliOptions)
+      ? await checkDomainClaim(siteName, current.id, target)
       : current;
   console.log(formatDomainClaim(claim));
 }
@@ -139,9 +143,10 @@ export async function removeDomain(
   cliOptions: CliOptions = {},
   dependencies: RemoveDependencies = { confirm }
 ): Promise<void> {
-  const capability = await getDomainCapability(cliOptions);
+  const target = announcedTarget(cliOptions);
+  const capability = await getDomainCapability(target);
   if (capability.status === "disabled") requireReady(capability);
-  const claim = resolveDomainClaim(await getDomainClaims(siteName, cliOptions), hostname);
+  const claim = resolveDomainClaim(await getDomainClaims(siteName, target), hostname);
   if (["expired", "cancelled"].includes(claim.status) || claim.route_status === "removed") {
     console.log(`Custom domain ${claim.hostname} is already inactive.`);
     return;
@@ -153,14 +158,14 @@ export async function removeDomain(
   if (
     !options.yes &&
     !(await dependencies.confirm(
-      `Remove custom domain '${claim.hostname}' from site '${siteName}'?\n` +
+      `Remove custom domain '${claim.hostname}' from site '${siteName}' on ${serverLabel(target)}?\n` +
         "Buzz will stop tracking ownership and routing, but will not change DNS records."
     ))
   ) {
     console.log("Aborted.");
     return;
   }
-  const status = await cancelDomainClaim(siteName, claim.id, cliOptions);
+  const status = await cancelDomainClaim(siteName, claim.id, target);
   if (status === 202) {
     console.log(`Removal requested for ${claim.hostname}.`);
     console.log("The domain remains reserved until its router withdrawal is confirmed.");

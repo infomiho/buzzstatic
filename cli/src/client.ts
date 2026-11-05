@@ -1,39 +1,19 @@
 import { CliError } from "./errors.js";
 import {
-  DEFAULT_SERVER,
-  getCredential,
-  loadConfig,
-  normalizeServerUrl,
-} from "./credentials.js";
+  missingCredential,
+  rejectedCredential,
+  serverLabel,
+  sessionRequired,
+  type Target,
+} from "./target.js";
 
 export { CliError } from "./errors.js";
+export type { CliOptions, Target } from "./target.js";
 
 export type Guard<T> = (value: unknown) => value is T;
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-export interface CliOptions {
-  server?: string;
-  token?: string;
-}
-
-export interface ResolvedOptions {
-  server: string;
-  token?: string;
-}
-
-export function getOptions(cliOptions: CliOptions = {}): ResolvedOptions {
-  const config = loadConfig();
-  const server = normalizeServerUrl(
-    cliOptions.server || process.env.BUZZ_SERVER || config.server || DEFAULT_SERVER
-  );
-  return {
-    server,
-    token:
-      cliOptions.token || process.env.BUZZ_TOKEN || getCredential(config, server),
-  };
 }
 
 export function authHeaders(token?: string): Record<string, string> {
@@ -66,14 +46,21 @@ export function isSiteArray(value: unknown): value is Site[] {
 
 export interface ApiErrors {
   unauthorized?: CliError;
-  forbidden?: (serverMessage: string) => CliError;
+  forbidden?: (serverMessage: string, target: Target) => CliError;
   notFound?: string | CliError;
   fallback?: string;
 }
 
+export function sessionOnly(action: string): ApiErrors["forbidden"] {
+  return (message, target) =>
+    message === "Deploy tokens cannot perform this operation"
+      ? sessionRequired(target, `Deployment tokens cannot ${action}`)
+      : new CliError(message);
+}
+
 export interface ApiOptions {
+  target: Target;
   auth?: "required" | "none";
-  cliOptions?: CliOptions;
   fetchFn?: typeof fetch;
   errors?: ApiErrors;
 }
@@ -126,45 +113,39 @@ async function httpError(response: Response, errors: ApiErrors): Promise<CliErro
 export async function apiFetch(
   path: string,
   init: RequestInit = {},
-  opts: ApiOptions = {}
+  opts: ApiOptions
 ): Promise<Response> {
-  const {
-    auth = "required",
-    cliOptions = {},
-    fetchFn = globalThis.fetch,
-    errors = {},
-  } = opts;
-  const options = getOptions(cliOptions);
+  const { target, auth = "required", fetchFn = globalThis.fetch, errors = {} } = opts;
 
-  if (auth === "required" && !options.token) {
-    throw new CliError("Not authenticated", "Run 'buzz login' first");
+  if (auth === "required" && !target.token) {
+    throw missingCredential(target);
   }
 
   let response: Response;
   try {
-    response = await fetchFn(`${options.server}${path}`, {
+    response = await fetchFn(`${target.url}${path}`, {
       ...init,
       headers: {
-        ...(auth === "none" ? {} : authHeaders(options.token)),
+        ...(auth === "none" ? {} : authHeaders(target.token)),
         ...init.headers,
       },
     });
   } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
     throw new CliError(
-      `Could not connect to server - ${error instanceof Error ? error.message : error}`
+      `Could not connect to ${serverLabel(target)} - ${reason}`,
+      undefined,
+      "CONNECTION_FAILED"
     );
   }
 
   if (auth !== "none") {
     if (response.status === 401) {
-      throw (
-        errors.unauthorized ??
-        new CliError("Session expired", "Run 'buzz login' to re-authenticate")
-      );
+      throw errors.unauthorized ?? rejectedCredential(target);
     }
     if (response.status === 403) {
       const message = await errorMessage(response, "Permission denied");
-      throw errors.forbidden ? errors.forbidden(message) : new CliError(message);
+      throw errors.forbidden ? errors.forbidden(message, target) : new CliError(message);
     }
   }
 
@@ -175,7 +156,7 @@ export async function requestJson<T>(
   path: string,
   spec: JsonSpec<T>,
   init: RequestInit = {},
-  opts: ApiOptions = {}
+  opts: ApiOptions
 ): Promise<T> {
   const response = await apiFetch(path, init, opts);
   if (!response.ok) {
@@ -194,7 +175,7 @@ export async function requestEmpty<S extends number>(
   path: string,
   okStatuses: readonly S[],
   init: RequestInit = {},
-  opts: ApiOptions = {}
+  opts: ApiOptions
 ): Promise<S> {
   const response = await apiFetch(path, init, opts);
   const matched = okStatuses.find((status) => status === response.status);

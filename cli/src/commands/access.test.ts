@@ -73,7 +73,7 @@ describe("access commands", () => {
 
     await makePublic({ site: "my-site" }, cliOptions, { confirm });
 
-    expect(confirm).toHaveBeenCalledWith("Make 'my-site' public?");
+    expect(confirm).toHaveBeenCalledWith("Make 'my-site' public on https://buzz.example.com?");
     expect(fetchMock).not.toHaveBeenCalled();
     expect(console.log).toHaveBeenCalledWith("Aborted.");
   });
@@ -128,7 +128,7 @@ describe("access commands", () => {
 
     await expect(accessStatus({ site: "my-site" }, cliOptions)).rejects.toMatchObject({
       message: "Deployment tokens cannot manage site access",
-      tip: "Run 'buzz login' and retry with a full session",
+      tip: "Omit --token, then run: buzz login --server https://buzz.example.com",
     });
   });
 });

@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { resolveSiteName, packSite, uploadSite } from "./deploy.js";
+import { testTarget } from "./test/target.js";
 
 function makeTmpDir(): string {
   return mkdtempSync(join(tmpdir(), "buzz-test-"));
@@ -108,13 +109,11 @@ describe("uploadSite", () => {
       }));
     };
 
-    await uploadSite("https://buzz.example.com", "token", archive, "my-site", fetchFn);
+    await uploadSite(testTarget({ url: "https://buzz.example.com", token: "token" }), archive, "my-site", fetchFn);
   });
 
   it("returns the explicit site name on success", async () => {
-    const result = await uploadSite(
-      "http://localhost:8080",
-      "test-token",
+    const result = await uploadSite(testTarget({ url: "http://localhost:8080", token: "test-token" }),
       zip,
       "my-site",
       fakeFetch(200, {
@@ -132,9 +131,7 @@ describe("uploadSite", () => {
   });
 
   it("accepts the previous server response while packages roll out", async () => {
-    const result = await uploadSite(
-      "http://localhost:8080",
-      "test-token",
+    const result = await uploadSite(testTarget({ url: "http://localhost:8080", token: "test-token" }),
       zip,
       "my-site",
       fakeFetch(200, {
@@ -151,9 +148,7 @@ describe("uploadSite", () => {
   it.each([null, "1", true, {}, [], 0, -1, 1.5])(
     "rejects an invalid deployment number in an upload response: %j",
     async (deploymentNumber) => {
-      await expect(uploadSite(
-        "https://buzz.example.com",
-        "token",
+      await expect(uploadSite(testTarget({ url: "https://buzz.example.com", token: "token" }),
         zip,
         "my-site",
         fakeFetch(200, {
@@ -174,9 +169,7 @@ describe("uploadSite", () => {
       )
     );
 
-    await uploadSite(
-      "https://buzz.example.com",
-      "test-token",
+    await uploadSite(testTarget({ url: "https://buzz.example.com", token: "test-token" }),
       zip,
       "my-site",
       fetchFn,
@@ -201,7 +194,7 @@ describe("uploadSite", () => {
       )
     );
 
-    await uploadSite("https://buzz.example.com", "test-token", zip, "my-site", fetchFn);
+    await uploadSite(testTarget({ url: "https://buzz.example.com", token: "test-token" }), zip, "my-site", fetchFn);
 
     const headers = (fetchFn.mock.calls[0][1] as RequestInit)
       .headers as Record<string, string>;
@@ -210,9 +203,7 @@ describe("uploadSite", () => {
 
   it("rejects a deployment response without a site name", async () => {
     await expect(
-      uploadSite(
-        "http://localhost:8080",
-        "test-token",
+      uploadSite(testTarget({ url: "http://localhost:8080", token: "test-token" }),
         zip,
         undefined,
         fakeFetch(200, { url: "https://custom.example.com" })
@@ -222,21 +213,17 @@ describe("uploadSite", () => {
 
   it("throws CliError on 401", async () => {
     await expect(
-      uploadSite(
-        "http://localhost:8080",
-        "bad-token",
+      uploadSite(testTarget({ url: "http://localhost:8080", token: "bad-token" }),
         zip,
         undefined,
         fakeFetch(401, { detail: "Unauthorized" })
       )
-    ).rejects.toThrow("Not authenticated");
+    ).rejects.toThrow("was rejected by http://localhost:8080");
   });
 
   it("explains ownership conflicts", async () => {
     try {
-      await uploadSite(
-        "http://localhost:8080",
-        "test-token",
+      await uploadSite(testTarget({ url: "http://localhost:8080", token: "test-token" }),
         zip,
         "taken",
         fakeFetch(403, { detail: "Site 'taken' is owned by another user" })

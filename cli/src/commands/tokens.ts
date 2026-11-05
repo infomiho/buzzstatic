@@ -5,6 +5,7 @@ import {
   requestJson,
   type CliOptions,
 } from "../client.js";
+import { announcedTarget } from "../target.js";
 
 interface DeploymentToken {
   id: string;
@@ -38,6 +39,7 @@ function isCreatedToken(value: unknown): value is CreatedToken {
 }
 
 export async function listTokens(cliOptions: CliOptions = {}) {
+  const target = announcedTarget(cliOptions);
   const tokens = await requestJson(
     "/tokens",
     {
@@ -45,7 +47,7 @@ export async function listTokens(cliOptions: CliOptions = {}) {
       invalid: "Server returned an invalid deployment-token response",
     },
     {},
-    { cliOptions }
+    { target }
   );
 
   if (tokens.length === 0) {
@@ -71,6 +73,7 @@ export async function createToken(
   cmdOptions: { name?: string },
   cliOptions: CliOptions = {}
 ) {
+  const target = announcedTarget(cliOptions);
   const data = await requestJson(
     "/tokens",
     {
@@ -85,8 +88,7 @@ export async function createToken(
         name: cmdOptions.name || "Deployment token",
       }),
     },
-    {
-      cliOptions,
+    { target,
       errors: { notFound: `Site '${siteName}' not found`, fallback: "Unknown error" },
     }
   );
@@ -101,11 +103,12 @@ export async function deleteToken(
   tokenId: string,
   cliOptions: CliOptions = {}
 ) {
+  const target = announcedTarget(cliOptions);
   await requestEmpty(
     `/tokens/${tokenId}`,
     [204],
     { method: "DELETE" },
-    { cliOptions, errors: { notFound: "Token not found", fallback: "Unknown error" } }
+    { target, errors: { notFound: "Token not found", fallback: "Unknown error" } }
   );
   console.log("Token deleted");
 }

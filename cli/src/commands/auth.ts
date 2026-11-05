@@ -3,19 +3,32 @@ import { Command } from "commander";
 import {
   apiFetch,
   authHeaders,
-  getOptions,
   isRecord,
   requestJson,
+  sessionOnly,
   CliError,
   type CliOptions,
 } from "../client.js";
+import {
+  CREDENTIAL_LABELS,
+  SELECTION_LABELS,
+  loginCommand,
+  resolveTarget,
+  runningInCi,
+  serverLabel,
+  serverSelector,
+  type Target,
+} from "../target.js";
 import { checkServerCompatibility } from "../compat.js";
+import { errorJson, type ErrorJson } from "../errors.js";
 import {
   clearCredential,
   getCredential,
   loadConfig,
   saveConfig,
+  serverNameFor,
   setCredential,
+  type Config,
 } from "../credentials.js";
 
 interface DeviceStart {
@@ -82,10 +95,48 @@ function isUser(value: unknown): value is AuthUser {
   return isRecord(value) && typeof value.login === "string";
 }
 
-export async function login(cliOptions: CliOptions = {}) {
-  const options = getOptions(cliOptions);
+function defaultServerLines(config: Config, target: Target): string[] {
+  if (!config.server) {
+    return ["Default server: none", `Set a default: buzz server default ${serverSelector(target)}`];
+  }
+  const name = serverNameFor(config, config.server);
+  return [`Default server: ${serverLabel({ url: config.server, name })}`];
+}
 
-  await checkServerCompatibility(cliOptions);
+function remainingTokenLines(target: Target, after: "login" | "logout"): string[] {
+  const lines: string[] = [];
+  if (target.credential === "flag") {
+    lines.push(
+      after === "login"
+        ? "--token overrides the saved session only for commands that include it."
+        : "The --token value was not revoked and still works when supplied."
+    );
+  }
+  if (target.hasEnvToken) {
+    lines.push("BUZZ_TOKEN is still set, so commands in this environment keep using it.");
+  }
+  return lines;
+}
+
+function loginInCi(): CliError {
+  return new CliError(
+    "Browser sign-in is not available in CI",
+    "Create a deployment token with 'buzz tokens create <site>', then set BUZZ_TOKEN and BUZZ_SERVER",
+    "LOGIN_IN_CI"
+  );
+}
+
+interface LoginOptions {
+  browser?: boolean;
+}
+
+export async function login(options: LoginOptions = {}, cliOptions: CliOptions = {}) {
+  if (runningInCi()) throw loginInCi();
+  const target = resolveTarget(cliOptions);
+  console.error(`Signing in to ${serverLabel(target)}`);
+  console.error(`Selected by: ${SELECTION_LABELS[target.source]}\n`);
+
+  await checkServerCompatibility(target);
 
   const start = await requestJson(
     "/auth/device",
@@ -94,13 +145,16 @@ export async function login(cliOptions: CliOptions = {}) {
       invalid: "Server returned an invalid device authorization response",
     },
     { method: "POST" },
-    { auth: "none", cliOptions, errors: { fallback: "Failed to start login" } }
+    { target, auth: "none", errors: { fallback: "Failed to start login" } }
   );
 
-  console.log(`\nOpen: ${start.verification_uri}`);
-  console.log(`Enter this code to approve: ${start.user_code}\n`);
-  console.log("Approve the sign-in in your browser. Waiting...");
-  openInBrowser(start.verification_uri);
+  console.error(`Open: ${start.verification_uri}`);
+  console.error(`Enter code: ${start.user_code}`);
+  console.error("Check the account in your browser, then approve sign-in.");
+  console.error("Waiting for approval...");
+  if (options.browser !== false && process.stderr.isTTY) {
+    openInBrowser(start.verification_uri);
+  }
 
   const interval = (start.interval || 5) * 1000;
   const maxAttempts = Math.ceil((start.expires_in || 900) / (start.interval || 5));
@@ -116,7 +170,7 @@ export async function login(cliOptions: CliOptions = {}) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ device_code: start.device_code }),
       },
-      { auth: "none", cliOptions, errors: { fallback: "Login failed" } }
+      { target, auth: "none", errors: { fallback: "Login failed" } }
     );
 
     if (poll.status === "pending") {
@@ -124,84 +178,132 @@ export async function login(cliOptions: CliOptions = {}) {
     }
 
     if (poll.error) {
-      throw new CliError(poll.error);
+      throw new CliError(poll.error, `Try again: ${loginCommand(target)}`, "LOGIN_FAILED");
     }
 
     if (poll.status === "complete" && poll.token && poll.user) {
       const config = loadConfig();
-      setCredential(config, options.server, poll.token);
+      setCredential(config, target.url, poll.token);
       saveConfig(config);
-      console.log(`\nLogged in as ${poll.user.login}`);
+      console.log(
+        [
+          `Signed in to ${serverLabel(target)} as @${poll.user.login}.`,
+          ...defaultServerLines(config, target),
+          ...remainingTokenLines(target, "login"),
+        ].join("\n")
+      );
       return;
     }
   }
 
-  throw new CliError("Login timed out");
+  throw new CliError("Login timed out", `Try again: ${loginCommand(target)}`, "LOGIN_TIMED_OUT");
 }
 
-export async function logout(cliOptions: CliOptions = {}) {
-  const options = getOptions(cliOptions);
-  const config = loadConfig();
-  const token = getCredential(config, options.server);
-
-  if (!token) {
-    console.log(`Not logged in to ${options.server}`);
-    if (options.token) {
-      console.log(
-        "Note: logout only clears credentials stored by 'buzz login'; --token and BUZZ_TOKEN are unaffected"
-      );
-    }
-    return;
-  }
-
-  let revoked = false;
+async function revokeSession(target: Target, token: string): Promise<boolean> {
   try {
     const response = await apiFetch(
       "/auth/logout",
       { method: "POST", headers: authHeaders(token) },
-      { auth: "none", cliOptions }
+      { target, auth: "none" }
     );
     // 400 means the session is already invalid on the server.
-    revoked = response.ok || response.status === 400;
+    return response.ok || response.status === 400;
   } catch {
-    revoked = false;
-  }
-
-  clearCredential(config, options.server);
-  saveConfig(config);
-
-  if (revoked) {
-    console.log("Logged out");
-  } else {
-    console.log(
-      `Logged out locally, but the session on ${options.server} could not be revoked`
-    );
+    return false;
   }
 }
 
-export async function whoami(cliOptions: CliOptions = {}) {
-  const user = await requestJson(
+export async function logout(cliOptions: CliOptions = {}) {
+  const config = loadConfig();
+  const target = resolveTarget(cliOptions, config);
+  const server = serverLabel(target);
+  const token = getCredential(config, target.url);
+
+  if (!token) {
+    console.log([`No saved session for ${server}.`, ...remainingTokenLines(target, "logout")].join("\n"));
+    return;
+  }
+
+  const revoked = await revokeSession(target, token);
+  clearCredential(config, target.url);
+  saveConfig(config);
+
+  const result = revoked
+    ? `Signed out of ${server}. Removed the saved session.`
+    : `Removed the saved session for ${server}, but could not confirm it was revoked on the server.`;
+  console.log([result, ...remainingTokenLines(target, "logout")].join("\n"));
+}
+
+interface WhoamiOptions {
+  json?: boolean;
+}
+
+async function verifiedAccount(target: Target): Promise<AuthUser> {
+  return requestJson(
     "/auth/me",
     { guard: isUser, invalid: "Server returned an invalid user response" },
     {},
-    { cliOptions }
+    { target, errors: { forbidden: sessionOnly("verify an account") } }
   );
-  console.log(`Logged in as ${user.login}${user.name ? ` (${user.name})` : ""}`);
+}
+
+async function whoamiJson(cliOptions: CliOptions): Promise<void> {
+  let target: Target | undefined;
+  let account: { login: string; name: string | null } | null = null;
+  let error: ErrorJson | null = null;
+  try {
+    target = resolveTarget(cliOptions);
+    const user = await verifiedAccount(target);
+    account = { login: user.login, name: user.name ?? null };
+  } catch (caught) {
+    error = errorJson(caught);
+    process.exitCode = 1;
+  }
+  const selected = target
+    ? { name: target.name ?? null, url: target.url, source: target.source }
+    : null;
+  const authentication = { source: target?.credential ?? "none" };
+  console.log(
+    JSON.stringify(
+      { schema_version: 1, selected_server: selected, authentication, account, error },
+      null,
+      2
+    )
+  );
+}
+
+export async function whoami(options: WhoamiOptions = {}, cliOptions: CliOptions = {}) {
+  if (options.json) return whoamiJson(cliOptions);
+  const target = resolveTarget(cliOptions);
+  const user = await verifiedAccount(target);
+  console.log(
+    [
+      `Signed in to ${serverLabel(target)} as @${user.login}${user.name ? ` (${user.name})` : ""}`,
+      `Selected by: ${SELECTION_LABELS[target.source]}`,
+      `Authentication: ${CREDENTIAL_LABELS[target.credential]}`,
+    ].join("\n")
+  );
 }
 
 export function registerAuthCommands(program: Command) {
   program
     .command("login")
-    .description("Sign in via your browser")
-    .action(() => login(program.opts()));
+    .description("Sign in to the selected server via your browser (keeps the default)")
+    .option("--no-browser", "Print the approval URL and code without opening a browser")
+    .addHelpText(
+      "after",
+      "\nExamples:\n  buzz login                 Sign in to the default server\n  buzz login --server work   Sign in to the server saved as 'work'"
+    )
+    .action((options: LoginOptions) => login(options, program.opts()));
 
   program
     .command("logout")
-    .description("Sign out and clear the stored session")
+    .description("Sign out of the selected server and remove its saved session")
     .action(() => logout(program.opts()));
 
   program
     .command("whoami")
-    .description("Show the current signed-in user")
-    .action(() => whoami(program.opts()));
+    .description("Verify which account the selected server signs you in as")
+    .option("--json", "Print the result as JSON")
+    .action((options: WhoamiOptions) => whoami(options, program.opts()));
 }

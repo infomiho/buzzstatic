@@ -33,7 +33,9 @@ Ask the agent to deploy a build directory:
 Deploy ./dist to Buzz as my-site.
 ```
 
-The skill instructs the agent to confirm Node.js 22 and the `buzz` command, configure the server URL, run `buzz login` when no session exists, and deploy with an explicit site name. It also instructs the agent to ask before running `buzz delete` or `buzz access public`.
+The skill instructs the agent to confirm Node.js 22 and the `buzz` command, then run `buzz server --json` to find the selected server. The agent uses the server you ask for, or the selected one, and passes its URL with `--server` on every later command, so a changed default can't redirect the task. When sign-in is needed, the agent runs `buzz login --server <url> --no-browser` and gives you the approval link and code. It deploys with an explicit site name and asks before running `buzz delete` or `buzz access public`.
+
+Say which server to use when you have several, for example `Deploy ./dist to my work Buzz server as my-site.` See [Use Several Servers](../use-several-servers/).
 
 ## Keep Credentials Out Of Prompts
 

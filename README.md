@@ -20,10 +20,10 @@ You need Node.js 22 or later, npm, a GitHub account, access to a running Buzz se
    npm install --global @infomiho/buzz-cli
    ```
 
-2. Configure your server URL:
+2. Save your server and make it the default:
 
    ```bash
-   buzz config server https://buzz.example.com
+   buzz server add main https://buzz.example.com --default
    ```
 
 3. Sign in with GitHub. Follow the printed URL and enter the displayed code:

@@ -7,8 +7,9 @@ import {
   type Guard,
 } from "./client.js";
 import { CliError } from "./errors.js";
+import { testTarget } from "./test/target.js";
 
-const cliOptions = { server: "https://buzz.example.com", token: "session-token" };
+const target = testTarget();
 
 const anyGuard: Guard<unknown> = (_value: unknown): _value is unknown => true;
 
@@ -27,10 +28,10 @@ describe("apiFetch authentication", () => {
     const fetchFn = vi.fn<typeof fetch>();
 
     await expect(
-      apiFetch("/x", {}, { cliOptions: { server: "http://no-token.invalid" }, fetchFn })
+      apiFetch("/x", {}, { target: testTarget({ credential: "none", token: undefined }), fetchFn })
     ).rejects.toMatchObject({
-      message: "Not authenticated",
-      tip: "Run 'buzz login' first",
+      message: "No saved session for https://buzz.example.com",
+      tip: "Run: buzz login --server https://buzz.example.com",
     });
     expect(fetchFn).not.toHaveBeenCalled();
   });
@@ -40,7 +41,7 @@ describe("apiFetch authentication", () => {
       .fn<typeof fetch>()
       .mockResolvedValue(new Response(null, { status: 204 }));
 
-    await requestEmpty("/x", [204], {}, { cliOptions, fetchFn });
+    await requestEmpty("/x", [204], {}, { target, fetchFn });
 
     const headers = fetchFn.mock.calls[0][1]?.headers as Record<string, string>;
     expect(headers.Authorization).toBe("Bearer session-token");
@@ -51,7 +52,7 @@ describe("apiFetch authentication", () => {
       .fn<typeof fetch>()
       .mockResolvedValue(new Response(null, { status: 204 }));
 
-    await requestEmpty("/x", [204], {}, { auth: "none", cliOptions, fetchFn });
+    await requestEmpty("/x", [204], {}, { auth: "none", target, fetchFn });
 
     const headers = fetchFn.mock.calls[0][1]?.headers as Record<string, string>;
     expect(headers?.Authorization).toBeUndefined();
@@ -60,7 +61,7 @@ describe("apiFetch authentication", () => {
   it("does not remap 401 responses when auth is none", async () => {
     const fetchFn = fetchOnce(new Response(null, { status: 401 }));
 
-    const response = await apiFetch("/x", {}, { auth: "none", cliOptions, fetchFn });
+    const response = await apiFetch("/x", {}, { auth: "none", target, fetchFn });
 
     expect(response.status).toBe(401);
   });
@@ -72,17 +73,17 @@ describe("apiFetch errors", () => {
       throw new Error("ECONNREFUSED");
     };
 
-    await expect(apiFetch("/x", {}, { cliOptions, fetchFn })).rejects.toThrow(
-      "Could not connect to server - ECONNREFUSED"
+    await expect(apiFetch("/x", {}, { target, fetchFn })).rejects.toThrow(
+      "Could not connect to https://buzz.example.com - ECONNREFUSED"
     );
   });
 
-  it("maps 401 to a session-expired error by default", async () => {
+  it("maps 401 to a rejected-credential error that keeps the server", async () => {
     const fetchFn = fetchOnce(new Response(null, { status: 401 }));
 
-    await expect(apiFetch("/x", {}, { cliOptions, fetchFn })).rejects.toMatchObject({
-      message: "Session expired",
-      tip: "Run 'buzz login' to re-authenticate",
+    await expect(apiFetch("/x", {}, { target, fetchFn })).rejects.toMatchObject({
+      message: "The token from --token was rejected by https://buzz.example.com",
+      tip: "Replace --token, or omit it and run: buzz login --server https://buzz.example.com",
     });
   });
 
@@ -93,7 +94,7 @@ describe("apiFetch errors", () => {
       apiFetch(
         "/x",
         {},
-        { cliOptions, fetchFn, errors: { unauthorized: new CliError("Not authenticated") } }
+        { target, fetchFn, errors: { unauthorized: new CliError("Not authenticated") } }
       )
     ).rejects.toThrow("Not authenticated");
   });
@@ -103,13 +104,13 @@ describe("apiFetch errors", () => {
       new Response(JSON.stringify({ detail: "Nope" }), { status: 403 })
     );
 
-    await expect(apiFetch("/x", {}, { cliOptions, fetchFn })).rejects.toThrow("Nope");
+    await expect(apiFetch("/x", {}, { target, fetchFn })).rejects.toThrow("Nope");
   });
 
   it("uses permission denied for an empty 403 body", async () => {
     const fetchFn = fetchOnce(new Response(null, { status: 403 }));
 
-    await expect(apiFetch("/x", {}, { cliOptions, fetchFn })).rejects.toThrow(
+    await expect(apiFetch("/x", {}, { target, fetchFn })).rejects.toThrow(
       "Permission denied"
     );
   });
@@ -123,7 +124,7 @@ describe("apiFetch errors", () => {
       apiFetch(
         "/x",
         {},
-        { cliOptions, fetchFn, errors: { forbidden: (m) => new CliError(`mapped:${m}`) } }
+        { target, fetchFn, errors: { forbidden: (m) => new CliError(`mapped:${m}`) } }
       )
     ).rejects.toThrow("mapped:special");
   });
@@ -138,7 +139,7 @@ describe("requestJson", () => {
       isRecord(v) && v.ok === true;
 
     await expect(
-      requestJson("/x", { guard, invalid: "bad shape" }, {}, { cliOptions, fetchFn })
+      requestJson("/x", { guard, invalid: "bad shape" }, {}, { target, fetchFn })
     ).resolves.toEqual({ ok: true });
   });
 
@@ -156,7 +157,7 @@ describe("requestJson", () => {
           normalize: (v) => ({ ...(v as object), mode: "direct" }),
         },
         {},
-        { cliOptions, fetchFn }
+        { target, fetchFn }
       )
     ).resolves.toEqual({ mode: "direct" });
   });
@@ -169,7 +170,7 @@ describe("requestJson", () => {
       isRecord(v) && v.ok === true;
 
     await expect(
-      requestJson("/x", { guard, invalid: "bad shape" }, {}, { cliOptions, fetchFn })
+      requestJson("/x", { guard, invalid: "bad shape" }, {}, { target, fetchFn })
     ).rejects.toThrow("bad shape");
   });
 
@@ -181,7 +182,7 @@ describe("requestJson", () => {
         "/x",
         { guard: anyGuard, invalid: "invalid" },
         {},
-        { cliOptions, fetchFn, errors: { notFound: "missing" } }
+        { target, fetchFn, errors: { notFound: "missing" } }
       )
     ).rejects.toThrow("missing");
   });
@@ -194,7 +195,7 @@ describe("requestJson", () => {
         "/x",
         { guard: anyGuard, invalid: "invalid" },
         {},
-        { cliOptions, fetchFn, errors: { notFound: new CliError("gone", "look elsewhere") } }
+        { target, fetchFn, errors: { notFound: new CliError("gone", "look elsewhere") } }
       )
     ).rejects.toMatchObject({ message: "gone", tip: "look elsewhere" });
   });
@@ -205,7 +206,7 @@ describe("requestJson", () => {
     );
 
     await expect(
-      requestJson("/x", { guard: anyGuard, invalid: "invalid" }, {}, { cliOptions, fetchFn })
+      requestJson("/x", { guard: anyGuard, invalid: "invalid" }, {}, { target, fetchFn })
     ).rejects.toThrow("Nope");
   });
 
@@ -213,7 +214,7 @@ describe("requestJson", () => {
     const fetchFn = fetchOnce(new Response("plain failure", { status: 500 }));
 
     await expect(
-      requestJson("/x", { guard: anyGuard, invalid: "invalid" }, {}, { cliOptions, fetchFn })
+      requestJson("/x", { guard: anyGuard, invalid: "invalid" }, {}, { target, fetchFn })
     ).rejects.toThrow("plain failure");
   });
 
@@ -225,7 +226,7 @@ describe("requestJson", () => {
         "/x",
         { guard: anyGuard, invalid: "invalid" },
         {},
-        { cliOptions, fetchFn, errors: { fallback: "boom" } }
+        { target, fetchFn, errors: { fallback: "boom" } }
       )
     ).rejects.toThrow("boom");
   });
@@ -239,7 +240,7 @@ describe("requestJson", () => {
     );
 
     await expect(
-      requestJson("/x", { guard: anyGuard, invalid: "invalid" }, {}, { cliOptions, fetchFn })
+      requestJson("/x", { guard: anyGuard, invalid: "invalid" }, {}, { target, fetchFn })
     ).rejects.toMatchObject({ message: "later", tip: "Retry in 30 seconds" });
   });
 });
@@ -249,7 +250,7 @@ describe("requestEmpty", () => {
     const fetchFn = fetchOnce(new Response(null, { status: 202 }));
 
     await expect(
-      requestEmpty("/x", [202, 204], { method: "DELETE" }, { cliOptions, fetchFn })
+      requestEmpty("/x", [202, 204], { method: "DELETE" }, { target, fetchFn })
     ).resolves.toBe(202);
   });
 });
