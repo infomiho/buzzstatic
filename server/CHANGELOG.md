@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.8.0](https://github.com/infomiho/buzzstatic/compare/server-v0.7.1...server-v0.8.0) (2026-11-05)
+
+
+### Features
+
+* make the target Buzz server explicit ([#42](https://github.com/infomiho/buzzstatic/issues/42)) ([dbada3c](https://github.com/infomiho/buzzstatic/commit/dbada3c29aadac75f8900381c200c10bc1e29c3d))
+
+
+### Bug Fixes
+
+* **server:** use the actual port for the local control origin ([#43](https://github.com/infomiho/buzzstatic/issues/43)) ([fdd5e7b](https://github.com/infomiho/buzzstatic/commit/fdd5e7bcadeac40db1b78beaa37e2540d8b7735f))
+
 ## [0.7.1](https://github.com/infomiho/buzzstatic/compare/server-v0.7.0...server-v0.7.1) (2026-10-14)
 
 
