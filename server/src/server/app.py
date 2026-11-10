@@ -2,6 +2,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import asdict
 from contextlib import asynccontextmanager
+from datetime import timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlsplit
 
@@ -60,6 +61,11 @@ logger = logging.getLogger(__name__)
 # so it binds future CLIs, not old ones. Raise it only in the release that drops
 # or changes an endpoint an older CLI depends on.
 MIN_CLI_VERSION = "0.12.0"
+
+BUZZ_HOST_HSTS_MAX_AGE = timedelta(days=365)
+# An owner can point a custom domain away from Buzz, and browsers would keep
+# insisting on HTTPS there until this runs out.
+CUSTOM_DOMAIN_HSTS_MAX_AGE = timedelta(days=1)
 
 CONTENT_TYPES = {
     ".html": "text/html",
@@ -162,6 +168,10 @@ def wildcard_certificate_monitor(settings: Settings) -> WildcardCertificateMonit
     ):
         return None
     return WildcardCertificateMonitor(settings.custom_domain_origin_host, settings.domain)
+
+
+def strict_transport_security(max_age: timedelta) -> str:
+    return f"max-age={int(max_age.total_seconds())}"
 
 
 def origin_matches_host(origin: str, host: str, scheme: str) -> bool:
@@ -391,6 +401,7 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
         if not is_control_host(host, settings.domain):
             site_name = custom_domains.activated_site(request.url.hostname)
             if site_name:
+                request.state.serves_custom_domain = True
                 if request.url.path == "/.well-known/buzz-access/callback":
                     return await complete_access_callback(request, site_name, settings)
                 if request.method not in {"GET", "HEAD"}:
@@ -428,6 +439,23 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
         response = await call_next(request)
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Content-Security-Policy"] = "frame-ancestors 'none'"
+        return response
+
+    def hsts_max_age(request: Request) -> timedelta | None:
+        if settings.control_scheme != "https":
+            return None
+        host = request.headers.get("host")
+        if is_control_host(host, settings.domain) or extract_subdomain(host, settings.domain):
+            return BUZZ_HOST_HSTS_MAX_AGE
+        if getattr(request.state, "serves_custom_domain", False):
+            return CUSTOM_DOMAIN_HSTS_MAX_AGE
+        return None
+
+    @app.middleware("http")
+    async def require_https_on_later_visits(request: Request, call_next):
+        response = await call_next(request)
+        if max_age := hsts_max_age(request):
+            response.headers["Strict-Transport-Security"] = strict_transport_security(max_age)
         return response
 
     app.mount("/static", RevalidatedStaticFiles(directory=STATIC_DIR), name="static")
