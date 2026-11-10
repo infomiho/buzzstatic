@@ -38,6 +38,7 @@ from .device_authorization import DeviceAuthorizationService
 from .exceptions import BadRequest, Conflict, Forbidden, NotFound, PayloadTooLarge
 from .github import HttpGitHubClient
 from .github_login import GitHubOAuth
+from .https_redirect import HttpsRedirect
 from .passkeys import PasskeyService
 from .pending_store import PendingStore
 from .routes import access, account, auth, dashboard, device, domains, sites, tokens
@@ -186,6 +187,7 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
     wildcard_certificate = WildcardCertificateRuntime.from_settings(
         settings, on_published=certificate_monitor.check_soon if certificate_monitor else None
     )
+    https_redirect = HttpsRedirect.from_settings(settings)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -201,6 +203,8 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
         app.state.access.load_visibility()
         await custom_domains.start()
         wildcard_certificate.start()
+        if https_redirect:
+            https_redirect.publish()
         analytics_started = False
         try:
             app.state.analytics.start()

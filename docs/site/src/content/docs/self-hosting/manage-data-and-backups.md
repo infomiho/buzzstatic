@@ -41,7 +41,7 @@ A complete host recovery also needs:
 - The active Compose files and local overrides.
 - For standalone Docker Compose, the `buzz_traefik-certs` volume containing the custom-domain certificates.
   The `buzz_traefik-dynamic` volume holds files Buzz regenerates from `/data` and needs no backup.
-- For Coolify, the application's repository, deployment reference, Compose path, Raw Compose setting, and environment variables, plus the saved proxy configuration and its certificate state. `buzz-certificate.yaml` and `buzz-routes.yaml` in `/data/coolify/proxy/dynamic` need no backup.
+- For Coolify, the application's repository, deployment reference, Compose path, Raw Compose setting, and environment variables, plus the saved proxy configuration and its certificate state. `buzz-certificate.yaml`, `buzz-http.yaml`, and `buzz-routes.yaml` in `/data/coolify/proxy/dynamic` need no backup.
 
 Treat this recovery set as sensitive. It includes identity data, token hashes, hosted content, TLS private keys, and deployment secrets. Encrypt off-host backups and restrict operator access.
 

@@ -35,6 +35,7 @@ def test_environment_registry_covers_server_and_deployment_settings():
         "BUZZ_ACME_DIRECTORY_URL",
         "BUZZ_CUSTOM_DOMAINS_ENABLED",
         "BUZZ_TRAEFIK_HTTPS_ENTRYPOINT",
+        "BUZZ_TRAEFIK_HTTP_ENTRYPOINT",
         "BUZZ_TRAEFIK_SERVICE",
         "BUZZ_CUSTOM_DOMAIN_OPERATOR_TOKEN",
         "BUZZ_MAX_CUSTOM_DOMAINS_PER_SITE",
