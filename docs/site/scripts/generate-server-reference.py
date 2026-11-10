@@ -115,6 +115,9 @@ def render_env_example() -> str:
 # Wildcard certificate for BUZZ_DOMAIN and *.BUZZ_DOMAIN
 {setting('BUZZ_CLOUDFLARE_DNS_API_TOKEN')}
 {setting('BUZZ_ACME_DIRECTORY_URL', commented=True)}
+
+# HTTP to HTTPS redirect for BUZZ_DOMAIN and *.BUZZ_DOMAIN
+{setting('BUZZ_TRAEFIK_HTTP_ENTRYPOINT', commented=True)}
 """
 
 

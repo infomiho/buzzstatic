@@ -3,7 +3,8 @@
 # plus .env plus compose.override.yml in one directory), on a fake domain with no
 # outbound network. Deploys a site, checks routing through Traefik, routes a
 # hostname through the shared file-provider directory, then upgrades the server
-# image in place and checks that the site survived.
+# image in place and checks that the site survived and that plain HTTP redirects
+# to HTTPS.
 #
 # Usage: BUZZ_FROM_IMAGE=<image> BUZZ_TO_IMAGE=<image> server/tests/compose/boot-test.sh
 set -euo pipefail
@@ -40,6 +41,19 @@ https() {
   shift
   stack run --rm -T client --silent --show-error --insecure \
     --connect-to "::traefik:443" "$@" "https://$url"
+}
+
+http_redirect() {
+  local url=$1 answer
+  answer=$(stack run --rm -T client --silent --show-error --output /dev/null \
+    --connect-to "::traefik:80" --write-out '%{http_code} %{redirect_url}' "http://$url")
+  echo "$answer"
+  [[ "$answer" == "301 https://$url" ]]
+}
+
+expect_http_redirect() {
+  local description=$1 url=$2
+  expect "$description" "301 https://$url" "$(retry http_redirect "$url")"
 }
 
 cleanup() {
@@ -113,3 +127,5 @@ expect "server runs the new image" "$to_image" \
   "$(stack ps server --format '{{.Image}}')"
 expect "health after upgrade" '{"status":"' "$(retry https "$domain/health" --fail)"
 expect "site survived the upgrade" "$marker" "$(retry https "$site.$domain/" --fail)"
+expect_http_redirect "plain HTTP on the domain redirects to HTTPS" "$domain/health"
+expect_http_redirect "plain HTTP on a site redirects to HTTPS" "$site.$domain/"

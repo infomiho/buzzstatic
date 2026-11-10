@@ -31,6 +31,7 @@ class Settings:
     acme_directory_url: str
     custom_domains_enabled: bool
     traefik_https_entrypoint: str
+    traefik_http_entrypoint: str
     traefik_service: str
     traefik_cert_resolver: str
     custom_domain_operator_token: str | None
@@ -85,6 +86,7 @@ class Settings:
             acme_directory_url=environment_value("BUZZ_ACME_DIRECTORY_URL"),
             custom_domains_enabled=environment_value("BUZZ_CUSTOM_DOMAINS_ENABLED"),
             traefik_https_entrypoint=environment_value("BUZZ_TRAEFIK_HTTPS_ENTRYPOINT"),
+            traefik_http_entrypoint=environment_value("BUZZ_TRAEFIK_HTTP_ENTRYPOINT"),
             traefik_service=environment_value("BUZZ_TRAEFIK_SERVICE"),
             traefik_cert_resolver=environment_value("BUZZ_TRAEFIK_CERT_RESOLVER"),
             custom_domain_operator_token=environment_value("BUZZ_CUSTOM_DOMAIN_OPERATOR_TOKEN"),

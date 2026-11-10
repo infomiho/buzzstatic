@@ -4,7 +4,8 @@
 # override can add or change single keys. Never give Traefik a command: any
 # command-line argument makes it ignore these variables.
 # Buzz obtains the certificate for BUZZ_DOMAIN and *.BUZZ_DOMAIN itself and
-# publishes it, with custom-domain routers, through the shared dynamic volume.
+# publishes it, with the HTTP to HTTPS redirect and custom-domain routers,
+# through the shared dynamic volume.
 services:
   traefik:
     image: traefik:v3.7.14
@@ -15,8 +16,6 @@ services:
       TRAEFIK_PROVIDERS_FILE_DIRECTORY: /traefik/dynamic
       TRAEFIK_PROVIDERS_FILE_WATCH: "true"
       TRAEFIK_ENTRYPOINTS_WEB_ADDRESS: ":80"
-      TRAEFIK_ENTRYPOINTS_WEB_HTTP_REDIRECTIONS_ENTRYPOINT_TO: websecure
-      TRAEFIK_ENTRYPOINTS_WEB_HTTP_REDIRECTIONS_ENTRYPOINT_SCHEME: https
       TRAEFIK_ENTRYPOINTS_WEBSECURE_ADDRESS: ":443"
       TRAEFIK_CERTIFICATESRESOLVERS_LETSENCRYPT_ACME_STORAGE: /letsencrypt/acme-http.json
       TRAEFIK_CERTIFICATESRESOLVERS_LETSENCRYPT_ACME_HTTPCHALLENGE_ENTRYPOINT: web
@@ -36,6 +35,7 @@ services:
       BUZZ_DATA_DIR: /data
       BUZZ_TRAEFIK_DYNAMIC_DIR: /traefik-dynamic
       BUZZ_TRAEFIK_HTTPS_ENTRYPOINT: websecure
+      BUZZ_TRAEFIK_HTTP_ENTRYPOINT: web
       BUZZ_CUSTOM_DOMAIN_ORIGIN_HOST: traefik
       BUZZ_TRAEFIK_CERT_RESOLVER: letsencrypt
       BUZZ_CLOUDFLARE_DNS_API_TOKEN: ${BUZZ_CLOUDFLARE_DNS_API_TOKEN:?Set BUZZ_CLOUDFLARE_DNS_API_TOKEN in .env}

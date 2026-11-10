@@ -63,6 +63,8 @@ See [Troubleshoot Self-Hosting](../../troubleshooting/self-hosting/) for routing
 
 The Compose file bind-mounts `/data/coolify/proxy/dynamic` at `/traefik-dynamic` and sets `BUZZ_TRAEFIK_DYNAMIC_DIR` to it. Buzz keeps the certificate, its key, and the ACME account key in `/data/tls`. It writes the certificate to `buzz-certificate.yaml` in the dynamic directory and checks that file every five minutes, rewriting it when it is missing or changed without placing a new order. Buzz renews when a third of the certificate's lifetime remains. The Buzz routers set `tls=true` without a certificate resolver.
 
+Buzz also writes `buzz-http.yaml` to the dynamic directory. Its router on the `http` entrypoint redirects plain HTTP requests for `buzz.example.com` and its site subdomains to HTTPS.
+
 Buzz also requests a random site hostname through `coolify-proxy:443` every 5 minutes. When that certificate is invalid or expires within 21 days, `/health` reports `"status": "degraded"` and the dashboard shows a warning. `/health` is also degraded while Buzz cannot obtain, save, or publish the certificate. `wildcard_certificate_error` then holds a short code, such as `not_configured` when `BUZZ_CLOUDFLARE_DNS_API_TOKEN` is missing or `issuance_failed`, and the application logs hold the detail. After a failure Buzz retries after 2, 5, 15, and 30 minutes, then every 30 minutes. `/health` keeps returning HTTP 200, and sites keep being served. Monitor the `status` field rather than the exact response body.
 
 Keep Buzz the only source of this certificate. A proxy-issued wildcard for the same names makes Traefik pick either certificate at random after a restart, and nothing renews the proxy's copy.
@@ -77,7 +79,7 @@ Buzz works with Coolify's default proxy configuration, so **Reset configuration 
 
 Do not add Traefik dashboard or API labels, such as a router with `service=api@internal`, to the proxy. Buzz doesn't need them, and on the shared `coolify` network they expose Traefik's runtime state.
 
-Buzz writes only `buzz-certificate.yaml` and `buzz-routes.yaml`, each validated and replaced atomically, and never touches other files in `/data/coolify/proxy/dynamic`. One malformed file anywhere in that directory still stops Traefik from loading changes to every file there, and a proxy restart then drops all of their routes and certificates, including Coolify's own, until the file is fixed or removed. Coolify lists these files under **Servers > Proxy > Dynamic Configurations**. Do not edit Buzz's files there.
+Buzz writes only `buzz-certificate.yaml`, `buzz-http.yaml`, and `buzz-routes.yaml`, each validated and replaced atomically, and never touches other files in `/data/coolify/proxy/dynamic`. One malformed file anywhere in that directory still stops Traefik from loading changes to every file there, and a proxy restart then drops all of their routes and certificates, including Coolify's own, until the file is fixed or removed. Coolify lists these files under **Servers > Proxy > Dynamic Configurations**. Do not edit Buzz's files there.
 
 ## Enable Custom Domains
 
@@ -183,6 +185,6 @@ Earlier releases asked you to edit the proxy: a wildcard resolver, and for custo
 1. Add back the variables the old release needs: `BUZZ_TRAEFIK_CONTROL_TOKEN` with the value from the saved proxy configuration, and `BUZZ_TRAEFIK_CERT_RESOLVER` with its previous value.
 2. Paste the saved proxy configuration into **Servers > Proxy**, save it, and restart the proxy. Buzz's certificate keeps being served.
 3. Restore the previous `docker-compose.yml`, push, and redeploy.
-4. Delete `buzz-certificate.yaml` and `buzz-routes.yaml` from `/data/coolify/proxy/dynamic`. Otherwise stale routes and the random certificate pick return.
+4. Delete `buzz-certificate.yaml`, `buzz-http.yaml`, and `buzz-routes.yaml` from `/data/coolify/proxy/dynamic`. Otherwise stale routes and the random certificate pick return.
 
 Traefik orders its own wildcard only once Buzz's file is gone, so sites show the default certificate until that order completes, a few seconds in rehearsal and longer with Let's Encrypt and Cloudflare. With the separate `cloudflare` resolver and `acme-cloudflare.json` kept, Traefik serves the old certificate again without a gap.

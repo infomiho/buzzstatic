@@ -147,7 +147,7 @@ ENVIRONMENT_VARIABLES = (
     ),
     EnvironmentVariable(
         "BUZZ_TRAEFIK_DYNAMIC_DIR",
-        "Traefik file-provider directory mounted into the Buzz container. Buzz writes the wildcard certificate to `buzz-certificate.yaml` and custom-domain routers to `buzz-routes.yaml` there.",
+        "Traefik file-provider directory mounted into the Buzz container. Buzz writes the wildcard certificate to `buzz-certificate.yaml`, the HTTP to HTTPS redirect to `buzz-http.yaml`, and custom-domain routers to `buzz-routes.yaml` there.",
         example="/traefik-dynamic",
         parser=Path,
     ),
@@ -175,6 +175,12 @@ ENVIRONMENT_VARIABLES = (
         "Traefik HTTPS entrypoint expected by custom-domain routers.",
         default="https",
         example="https",
+    ),
+    EnvironmentVariable(
+        "BUZZ_TRAEFIK_HTTP_ENTRYPOINT",
+        "Traefik HTTP entrypoint on which Buzz redirects requests for `BUZZ_DOMAIN` and its site subdomains to HTTPS. Requires `BUZZ_TRAEFIK_DYNAMIC_DIR`.",
+        default="http",
+        example="http",
     ),
     EnvironmentVariable(
         "BUZZ_TRAEFIK_SERVICE",
