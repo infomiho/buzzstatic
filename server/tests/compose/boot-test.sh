@@ -111,6 +111,11 @@ http:
       service: buzz@docker
       middlewares: [compose-test-host]
       tls: {}
+    compose-test-http:
+      rule: Host(\`custom.example\`)
+      entryPoints: [web]
+      service: noop@internal
+      middlewares: [buzz-redirect-to-https]
   middlewares:
     compose-test-host:
       headers:
@@ -129,3 +134,5 @@ expect "health after upgrade" '{"status":"' "$(retry https "$domain/health" --fa
 expect "site survived the upgrade" "$marker" "$(retry https "$site.$domain/" --fail)"
 expect_http_redirect "plain HTTP on the domain redirects to HTTPS" "$domain/health"
 expect_http_redirect "plain HTTP on a site redirects to HTTPS" "$site.$domain/"
+expect_http_redirect "file-provider router redirects with the middleware Buzz publishes" \
+  custom.example/

@@ -19,6 +19,7 @@ class CustomDomainsConfig:
     traefik_cert_resolver: str | None
     traefik_dynamic_dir: Path | None
     traefik_https_entrypoint: str
+    traefik_http_entrypoint: str
     traefik_service: str
 
     @classmethod
@@ -32,5 +33,6 @@ class CustomDomainsConfig:
             traefik_cert_resolver=settings.traefik_cert_resolver,
             traefik_dynamic_dir=settings.traefik_dynamic_dir,
             traefik_https_entrypoint=settings.traefik_https_entrypoint,
+            traefik_http_entrypoint=settings.traefik_http_entrypoint,
             traefik_service=settings.traefik_service,
         )

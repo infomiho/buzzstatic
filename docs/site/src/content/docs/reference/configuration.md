@@ -31,7 +31,7 @@ Command-line options take precedence where noted.
 | `BUZZ_ACME_DIRECTORY_URL` | ACME directory Buzz uses for its wildcard certificate. Point it at the Let's Encrypt staging directory to rehearse issuance. | `https://acme-v02.api.letsencrypt.org/directory` | Optional |
 | `BUZZ_CUSTOM_DOMAINS_ENABLED` | Whether this Buzz server enables the optional custom-domain control plane. Requires `BUZZ_TRAEFIK_DYNAMIC_DIR`. | `false` | Optional |
 | `BUZZ_TRAEFIK_HTTPS_ENTRYPOINT` | Traefik HTTPS entrypoint expected by custom-domain routers. | `https` | Optional |
-| `BUZZ_TRAEFIK_HTTP_ENTRYPOINT` | Traefik HTTP entrypoint on which Buzz redirects requests for `BUZZ_DOMAIN` and its site subdomains to HTTPS. Requires `BUZZ_TRAEFIK_DYNAMIC_DIR`. | `http` | Optional |
+| `BUZZ_TRAEFIK_HTTP_ENTRYPOINT` | Traefik HTTP entrypoint on which Buzz redirects requests for `BUZZ_DOMAIN`, its site subdomains, and custom domains to HTTPS. Requires `BUZZ_TRAEFIK_DYNAMIC_DIR`. | `http` | Optional |
 | `BUZZ_TRAEFIK_SERVICE` | Provider-qualified Traefik service used by custom-domain routers. | `buzz@docker` | Optional |
 | `BUZZ_CUSTOM_DOMAIN_OPERATOR_TOKEN` | Bearer tokens, separated by commas, for the private custom-domain operator endpoint. The endpoint listens only when this is set. | Not set | Optional |
 | `BUZZ_MAX_CUSTOM_DOMAINS_PER_SITE` | Maximum pending and verified custom domains for one site. | `5` | Optional |

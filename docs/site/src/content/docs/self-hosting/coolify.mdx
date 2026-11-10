@@ -97,7 +97,7 @@ Custom domains are disabled by default and need no proxy changes. Skip this sect
 2. Open the site detail page of any site. The custom-domain section reports whether the control plane is ready.
 3. Add a custom hostname, publish the displayed DNS records, and select **Check ownership**.
 
-After ownership verifies, Buzz adds one generation-qualified `Host()` router to `buzz-routes.yaml`. Each version of that file carries a revision router on the reserved hostname `buzz-config-revision.invalid`, and Buzz treats a change as applied only once a probe through `coolify-proxy:443` shows Traefik serving that revision. Buzz needs no access to Traefik's API.
+After ownership verifies, Buzz adds one generation-qualified `Host()` router to `buzz-routes.yaml`, with a second router on the `http` entrypoint that redirects the hostname's plain HTTP requests to HTTPS. Each version of that file carries a revision router on the reserved hostname `buzz-config-revision.invalid`, and Buzz treats a change as applied only once a probe through `coolify-proxy:443` shows Traefik serving that revision. Buzz needs no access to Traefik's API.
 
 Traefik requests each custom hostname's certificate over HTTP-01 through `letsencrypt`, Coolify's default resolver. If your `letsencrypt` resolver uses DNS-01, add a separate HTTP-01 resolver with its own ACME storage file in **Servers > Proxy** and set `BUZZ_TRAEFIK_CERT_RESOLVER` to its name. A DNS-01 resolver cannot issue certificates for customer zones.
 
