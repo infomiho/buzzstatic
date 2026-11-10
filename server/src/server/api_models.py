@@ -40,6 +40,16 @@ class HealthResponse(BaseModel):
             "serves no custom domain until it is set. The server log has the detail."
         ),
     )
+    http_redirect_error: Literal[
+        "publish_failed", "proxy_unreachable", "not_redirecting"
+    ] | None = Field(
+        default=None,
+        description=(
+            "Why plain HTTP requests for `BUZZ_DOMAIN` may not reach HTTPS: Buzz could not "
+            "publish the redirect, could not reach the proxy on port 80, or the proxy does "
+            "not redirect. Buzz republishes and checks again every 5 minutes."
+        ),
+    )
 
 
 class VersionResponse(BaseModel):

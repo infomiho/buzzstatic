@@ -64,6 +64,14 @@ A `421 Misdirected Request` means the request's `Host` header doesn't match `BUZ
 
 The DNS record for `buzz.example.com` doesn't cover site hostnames. Add a separate `*.buzz` record as described in [Configure DNS And TLS](../../self-hosting/configure-dns-and-tls/).
 
+## Plain HTTP Does Not Redirect To HTTPS
+
+Buzz publishes the redirect itself and checks it through the proxy's port `80` every 5 minutes. Read `http_redirect_error` from `/health`:
+
+- `publish_failed`: Buzz could not write `buzz-http.yaml` to the dynamic directory. Check the mount and its permissions.
+- `proxy_unreachable`: Buzz cannot reach `BUZZ_CUSTOM_DOMAIN_ORIGIN_HOST` on port `80`.
+- `not_redirecting`: the proxy answers plain HTTP without a redirect to HTTPS. Check that `BUZZ_TRAEFIK_HTTP_ENTRYPOINT` names the proxy's port `80` entrypoint, `http` on Coolify and `web` in the standalone stack, and that Traefik loads the dynamic directory.
+
 ## TLS Certificate Issuance Fails
 
 Read `wildcard_certificate_error` from `/health`, then find the matching `Wildcard certificate:` line in the Buzz server logs:

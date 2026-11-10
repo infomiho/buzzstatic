@@ -1113,6 +1113,23 @@
             "description": "Custom-domain routers exist but `BUZZ_TRAEFIK_DYNAMIC_DIR` is unset, so Buzz serves no custom domain until it is set. The server log has the detail.",
             "title": "Custom Domains Error"
           },
+          "http_redirect_error": {
+            "anyOf": [
+              {
+                "enum": [
+                  "publish_failed",
+                  "proxy_unreachable",
+                  "not_redirecting"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why plain HTTP requests for `BUZZ_DOMAIN` may not reach HTTPS: Buzz could not publish the redirect, could not reach the proxy on port 80, or the proxy does not redirect. Buzz republishes and checks again every 5 minutes.",
+            "title": "Http Redirect Error"
+          },
           "status": {
             "description": "`degraded` reports a problem that does not stop Buzz from serving.",
             "enum": [

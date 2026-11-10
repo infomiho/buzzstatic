@@ -136,3 +136,5 @@ expect_http_redirect "plain HTTP on the domain redirects to HTTPS" "$domain/heal
 expect_http_redirect "plain HTTP on a site redirects to HTTPS" "$site.$domain/"
 expect_http_redirect "file-provider router redirects with the middleware Buzz publishes" \
   custom.example/
+expect "Buzz sees the redirect through the proxy" "None" "$(stack exec -T server python -c \
+  "from server.https_redirect import probe_https_redirect as probe; print(probe('traefik', '$domain'))")"
