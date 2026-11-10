@@ -204,7 +204,7 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
         await custom_domains.start()
         wildcard_certificate.start()
         if https_redirect:
-            https_redirect.publish()
+            https_redirect.start()
         analytics_started = False
         try:
             app.state.analytics.start()
@@ -221,6 +221,8 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
                 except Exception:
                     logger.exception("Analytics shutdown failed")
             await wildcard_certificate.stop()
+            if https_redirect:
+                await https_redirect.stop()
             await custom_domains.stop()
             app.state.access.close()
 
@@ -300,6 +302,7 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
     app.state.analytics = AnalyticsRecorder(database.connect)
     app.state.custom_domains = custom_domains
     app.state.wildcard_certificate = wildcard_certificate
+    app.state.https_redirect = https_redirect
     app.state.content_roots = content_roots
     app.state.certificate_monitor = certificate_monitor
 
@@ -449,16 +452,20 @@ def create_app(settings: Settings | None = None, database: Database | None = Non
     async def health():
         certificate = latest_certificate_health()
         certificate_failing = bool(certificate and not certificate.ok)
+        redirect = app.state.https_redirect
+        http_redirect_error = redirect.error_code if redirect else None
         degraded = (
             certificate_failing
             or bool(wildcard_certificate.error_code)
             or bool(custom_domains.error_code)
+            or bool(http_redirect_error)
         )
         return {
             "status": "degraded" if degraded else "ok",
             "wildcard_certificate": asdict(certificate) if certificate else None,
             "wildcard_certificate_error": wildcard_certificate.error_code,
             "custom_domains_error": custom_domains.error_code,
+            "http_redirect_error": http_redirect_error,
         }
 
     @app.get(
