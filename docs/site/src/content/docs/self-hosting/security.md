@@ -41,6 +41,10 @@ Buzz doesn't scan deployments for malware, phishing content, secrets, or harmful
 
 Sites use separate subdomains, and the dashboard session cookie is host-only, `HttpOnly`, `Secure` outside development mode, and `SameSite=Lax`.
 
+## HTTPS Only
+
+Buzz redirects plain HTTP requests to HTTPS and sends `Strict-Transport-Security` on every HTTPS response, so browsers skip plain HTTP on later visits. The policy lasts one year for `BUZZ_DOMAIN` and site subdomains, and one day for custom domains, because their owners can point them away from Buzz. It never includes `includeSubDomains` or `preload`.
+
 ## Limit Exposure And Resource Use
 
 - Expose the Buzz container through HTTPS rather than publishing port `8080` directly.
