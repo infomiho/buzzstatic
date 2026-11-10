@@ -159,6 +159,7 @@ class CustomDomainsRuntime:
         reconciler = DomainRouteReconciler(
             control,
             config.traefik_https_entrypoint,
+            config.traefik_http_entrypoint,
             config.traefik_service,
             config.traefik_cert_resolver,
             routing_enabled=lambda: True,
@@ -214,6 +215,7 @@ class CustomDomainsRuntime:
         reconciler = DomainRouteReconciler(
             control,
             config.traefik_https_entrypoint,
+            config.traefik_http_entrypoint,
             config.traefik_service,
             config.traefik_cert_resolver,
             routing_enabled=lambda: False,

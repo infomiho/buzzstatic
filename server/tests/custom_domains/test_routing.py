@@ -44,6 +44,7 @@ def reconciler(connect, control, enabled=True):
     return DomainRouteReconciler(
         control,
         "https",
+        "http",
         "buzz@docker",
         "buzz-custom",
         routing_enabled=lambda: enabled,
@@ -60,13 +61,19 @@ def test_routers_are_exact_and_deterministic(routing_db):
     with routing_db() as conn:
         claim = DomainClaimStore(conn).prepare_routes(True)[0]
 
-    assert custom_domain_routers([claim], "https", "buzz@docker", "buzz-custom") == {
+    assert custom_domain_routers([claim], "https", "http", "buzz@docker", "buzz-custom") == {
         claim.route_name: {
             "entryPoints": ["https"],
             "rule": "Host(`www.example.com`)",
             "service": "buzz@docker",
             "tls": {"certResolver": "buzz-custom"},
-        }
+        },
+        f"{claim.route_name}-http": {
+            "entryPoints": ["http"],
+            "rule": "Host(`www.example.com`)",
+            "middlewares": ["buzz-redirect-to-https"],
+            "service": "noop@internal",
+        },
     }
 
 
@@ -81,7 +88,9 @@ def test_reconciler_publishes_every_routable_alias(routing_db):
     reconciler(routing_db, control).run_once()
 
     routers = control.writes[-1]
-    assert set(routers) == {claim.route_name for claim in claims(routing_db)}
+    https_names = {claim.route_name for claim in claims(routing_db)}
+    http_names = {f"{name}-http" for name in https_names}
+    assert set(routers) == https_names | http_names
     assert {router["rule"] for router in routers.values()} == {
         "Host(`www.example.com`)",
         "Host(`two.example.com`)",

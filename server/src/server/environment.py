@@ -178,7 +178,7 @@ ENVIRONMENT_VARIABLES = (
     ),
     EnvironmentVariable(
         "BUZZ_TRAEFIK_HTTP_ENTRYPOINT",
-        "Traefik HTTP entrypoint on which Buzz redirects requests for `BUZZ_DOMAIN` and its site subdomains to HTTPS. Requires `BUZZ_TRAEFIK_DYNAMIC_DIR`.",
+        "Traefik HTTP entrypoint on which Buzz redirects requests for `BUZZ_DOMAIN`, its site subdomains, and custom domains to HTTPS. Requires `BUZZ_TRAEFIK_DYNAMIC_DIR`.",
         default="http",
         example="http",
     ),
